@@ -85,7 +85,7 @@ Also, it would be nice to have a tiny Iced GUI for this project. If someone pull
 polish it a little and start distributing binaries for anyone to benefit, not only Liana users and
 people who can use the command line.
 
-Contributions welcome!
+Contributions welcome! If you are interested, hit me up on the [Liana Discord](https://discord.gg/5TEkVxqm).
 
 NOTE: i am not interested in supporting altcoins. If you want to add support for one, feel free to
 fork the project.
