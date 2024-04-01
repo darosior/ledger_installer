@@ -281,9 +281,8 @@ checksum = "90ed8c1e510134f979dbc4f070f87d4313098b704861a105fe34231c70a3901c"
 
 [[package]]
 name = "minreq"
-version = "2.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb3371dfc7b772c540da1380123674a8e20583aca99907087d990ca58cf44203"
+version = "2.11.1-alpha"
+source = "git+https://github.com/darosior/minreq?branch=try_all_resolved_addrs#a2757124fc00f0c2fd9e6b7197bd64347bf0168f"
 dependencies = [
  "log",
  "once_cell",
