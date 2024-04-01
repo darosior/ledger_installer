@@ -1,9 +1,8 @@
-use form_urlencoded::Serializer as UrlSerializer;
 use ledger_apdu::APDUCommand;
-use ledger_transport_hidapi::{hidapi::HidApi, TransportNativeHID};
+use ledger_transport_hidapi::TransportNativeHID;
 use serde_derive::Deserialize;
 
-use std::{env, error, process, str};
+use std::{error, str};
 
 // https://github.com/LedgerHQ/ledger-live/blob/dd1d17fd3ce7ed42558204b2f93707fb9b1599de/libs/device-core/src/commands/use-cases/getVersion.ts#L6
 const GET_VERSION_COMMAND: APDUCommand<&[u8]> = APDUCommand {
@@ -41,14 +40,14 @@ const OPEN_APP_COMMAND_TEMPLATE: APDUCommand<&[u8]> = APDUCommand {
     data: &[],
 };
 
-const LIVE_COMMON_VERSION: &str = "34.0.0";
-const PROVIDER: u32 = 1; // TODO: make it possible to set it.
-const BASE_API_V1_URL: &str = "https://manager.api.live.ledger.com/api";
-const BASE_API_V2_URL: &str = "https://manager.api.live.ledger.com/api/v2";
-const BASE_SOCKET_URL: &str = "wss://scriptrunner.api.live.ledger.com/update";
+pub const LIVE_COMMON_VERSION: &str = "34.0.0";
+pub const PROVIDER: u32 = 1; // TODO: make it possible to set it.
+pub const BASE_API_V1_URL: &str = "https://manager.api.live.ledger.com/api";
+pub const BASE_API_V2_URL: &str = "https://manager.api.live.ledger.com/api/v2";
+pub const BASE_SOCKET_URL: &str = "wss://scriptrunner.api.live.ledger.com/update";
 
 #[derive(Debug, Clone, Copy)]
-enum StatusCode {
+pub enum StatusCode {
     //ACCESS_CONDITION_NOT_FULFILLED = 0x9804,
     //ALGORITHM_NOT_SUPPORTED = 0x9484,
     //CLA_NOT_SUPPORTED = 0x6e00,
@@ -93,7 +92,7 @@ enum StatusCode {
 // NOTE: MCU target id is always == target_id in Ledger Live
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
-struct DeviceInfo {
+pub struct DeviceInfo {
     pub target_id: u32,
     pub version: String,
     pub flags: Vec<u8>,
@@ -225,12 +224,12 @@ impl DeviceInfo {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-struct InstalledApp {
-    name: String,
-    hash: Vec<u8>,
-    hash_code_data: Vec<u8>,
-    blocks: u16,
-    flags: u16,
+pub struct InstalledApp {
+    pub name: String,
+    pub hash: Vec<u8>,
+    pub hash_code_data: Vec<u8>,
+    pub blocks: u16,
+    pub flags: u16,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -267,11 +266,11 @@ fn deser_apdu_command(hex_str: &str) -> Result<APDUCommand<Vec<u8>>, Box<dyn err
     })
 }
 
-// Some actions, such as installing apps or upgrading the firmware, are done in Ledger Live by
-// opening a socket so a remote server communicates directly with the Ledger. It appears to be
-// talking to an HSM up there which would manage sensitive actions.
-// Parameters are passed directly in the url. Don't forget to escape the necessary characters!
-fn query_via_websocket(
+/// Some actions, such as installing apps or upgrading the firmware, are done in Ledger Live by
+/// opening a socket so a remote server communicates directly with the Ledger. It appears to be
+/// talking to an HSM up there which would manage sensitive actions.
+/// Parameters are passed directly in the url. Don't forget to escape the necessary characters!
+pub fn query_via_websocket(
     ledger_api: &TransportNativeHID,
     url: &str,
 ) -> Result<(), Box<dyn error::Error>> {
@@ -368,86 +367,10 @@ fn query_via_websocket(
     }
 }
 
-// Print on stderr and exit with 1.
-macro_rules! error {
-    ($($arg:tt)*) => {{
-        eprintln!($($arg)*);
-        process::exit(1);
-    }};
-}
-
-#[derive(Debug, Clone, Copy)]
-enum Command {
-    GetInfo,
-    GenuineCheck,
-    InstallMainApp,
-    UpdateMainApp,
-    OpenMainApp,
-    InstallTestApp,
-    UpdateTestApp,
-    OpenTestApp,
-    UpdateeFirmware,
-}
-
-impl Command {
-    /// Read command from environment variables.
-    pub fn get() -> Option<Self> {
-        let is_testnet = env::var("LEDGER_TESTNET").is_ok();
-        let cmd_str = env::var("LEDGER_COMMAND").ok()?;
-
-        if cmd_str == "getinfo" {
-            Some(Self::GetInfo)
-        } else if cmd_str == "genuinecheck" {
-            Some(Self::GenuineCheck)
-        } else if cmd_str == "installapp" {
-            Some(if is_testnet {
-                Self::InstallTestApp
-            } else {
-                Self::InstallMainApp
-            })
-        } else if cmd_str == "updateapp" {
-            Some(if is_testnet {
-                Self::UpdateTestApp
-            } else {
-                Self::UpdateMainApp
-            })
-        } else if cmd_str == "openapp" {
-            Some(if is_testnet {
-                Self::OpenTestApp
-            } else {
-                Self::OpenMainApp
-            })
-        } else if cmd_str == "updatefirm" {
-            Some(Self::UpdateeFirmware)
-        } else {
-            None
-        }
-    }
-}
-
-fn ledger_api() -> TransportNativeHID {
-    let hid_api = match HidApi::new() {
-        Ok(a) => a,
-        Err(e) => error!("Error initializing HDI api: {}.", e),
-    };
-    match TransportNativeHID::new(&hid_api) {
-        Ok(a) => a,
-        Err(e) => error!("Error connecting to Ledger device: {}.", e),
-    }
-}
-
-fn device_info(ledger_api: &TransportNativeHID) -> DeviceInfo {
-    match DeviceInfo::new(&ledger_api) {
-        Ok(i) => i,
-        Err(e) => error!("Error fetching device info: {}. Is the Ledger unlocked?", e),
-    }
-}
-
-fn list_installed_apps(
+/// Get a list of applications installed on this device.
+pub fn list_installed_apps(
     ledger_api: &TransportNativeHID,
 ) -> Result<Vec<InstalledApp>, Box<dyn error::Error>> {
-    println!("Querying installed applications from your Ledger. You might have to confirm on your device.");
-
     let mut answer = ledger_api.exchange(&LIST_APPS_COMMAND)?;
     let mut data = answer.data();
 
@@ -501,27 +424,13 @@ fn list_installed_apps(
     Ok(installed_apps)
 }
 
-fn print_ledger_info(ledger_api: &TransportNativeHID) {
-    let device_info = device_info(ledger_api);
-    println!("Information about the device: {:#?}", device_info);
-
-    let apps = match list_installed_apps(&ledger_api) {
-        Ok(a) => a,
-        Err(e) => error!("Error listing installed applications: {}.", e),
-    };
-    println!("Installed applications:");
-    for app in apps {
-        println!("  - {:?}", app);
-    }
-}
-
 #[derive(Debug, Clone, Deserialize)]
-struct DeviceVersion {
+pub struct DeviceVersion {
     pub id: i64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct FirmwareInfo {
+pub struct FirmwareInfo {
     pub perso: String,
 }
 
@@ -556,21 +465,6 @@ impl FirmwareInfo {
         .unwrap();
         firm_resp.json::<FirmwareInfo>().unwrap()
     }
-}
-
-fn genuine_check(ledger_api: &TransportNativeHID) {
-    let device_info = device_info(ledger_api);
-    let firmware_info = FirmwareInfo::from_device(&device_info);
-
-    println!("Querying Ledger's remote HSM to perform the genuine check. You might have to confirm the operation on your device.");
-    let genuine_ws_url = UrlSerializer::new(format!("{}/genuine?", BASE_SOCKET_URL))
-        .append_pair("targetId", &device_info.target_id.to_string())
-        .append_pair("perso", &firmware_info.perso)
-        .finish();
-    if let Err(e) = query_via_websocket(&ledger_api, &genuine_ws_url) {
-        error!("Error when performing genuine check: {}.", e);
-    }
-    println!("Success. Your Ledger is genuine.");
 }
 
 // DON'T DELETE ME JUST YET.
@@ -622,44 +516,35 @@ fn genuine_check(ledger_api: &TransportNativeHID) {
 //println!("{}", bitcoin_app);
 
 #[derive(Debug, Clone, Deserialize)]
-struct BitcoinAppV2 {
+pub struct BitcoinAppV2 {
     #[serde(rename = "versionName")]
-    version_name: String,
-    perso: String,
+    pub version_name: String,
+    pub perso: String,
     #[serde(rename = "deleteKey")]
-    delete_key: String,
-    firmware: String,
+    pub delete_key: String,
+    pub firmware: String,
     #[serde(rename = "firmwareKey")]
-    firmware_key: String,
-    hash: String,
+    pub firmware_key: String,
+    pub hash: String,
 }
 
-// Install the Bitcoin app on the device.
-fn install_app(ledger_api: &TransportNativeHID, is_testnet: bool) {
-    // First of all make sure it's not already installed.
+/// Get the Bitcoin app information for this device. Set `is_testnet` to `true` to get the Test app
+/// instead.
+// This uses the v2 API. See for reference:
+// - https://github.com/LedgerHQ/ledger-live/blob/5a0a1aa5dc183116839851b79bceb6704f1de4b9/libs/ledger-live-common/src/apps/listApps/v2.ts
+// - https://github.com/LedgerHQ/ledger-live/blob/5a0a1aa5dc183116839851b79bceb6704f1de4b9/libs/device-core/src/managerApi/repositories/HttpManagerApiRepository.ts#L211
+// There is also another way which seems to be the API v1 way of getting the app info. See
+// above the commented out code.
+pub fn bitcoin_app(
+    device_info: &DeviceInfo,
+    is_testnet: bool,
+) -> Result<Option<BitcoinAppV2>, Box<dyn error::Error>> {
     let lowercase_app_name = if is_testnet {
         "bitcoin test"
     } else {
         "bitcoin"
     };
-    let apps = match list_installed_apps(&ledger_api) {
-        Ok(a) => a,
-        Err(e) => error!("Error listing installed applications: {}.", e),
-    };
-    if apps
-        .iter()
-        .any(|app| app.name.to_lowercase() == lowercase_app_name)
-    {
-        //error!("Bitcoin app already installed. Use the update command to update it.");
-    }
 
-    // Get the Bitcoin app information for this device.
-    // This uses the v2 API. See for reference:
-    // - https://github.com/LedgerHQ/ledger-live/blob/5a0a1aa5dc183116839851b79bceb6704f1de4b9/libs/ledger-live-common/src/apps/listApps/v2.ts
-    // - https://github.com/LedgerHQ/ledger-live/blob/5a0a1aa5dc183116839851b79bceb6704f1de4b9/libs/device-core/src/managerApi/repositories/HttpManagerApiRepository.ts#L211
-    // There is also another way which seems to be the API v1 way of getting the app info. See
-    // above the commented out code.
-    let device_info = device_info(ledger_api);
     let resp_apps = minreq::Request::new(
         minreq::Method::Get,
         format!("{}/apps/by-target", BASE_API_V2_URL),
@@ -668,97 +553,33 @@ fn install_app(ledger_api: &TransportNativeHID, is_testnet: bool) {
     .with_param("provider", PROVIDER.to_string()) // TODO: allow to configure the provider
     .with_param("target_id", device_info.target_id.to_string())
     .with_param("firmware_version_name", device_info.version.clone())
-    .send();
-    let resp_apps = match resp_apps {
-        Ok(r) => r,
-        Err(e) => error!(
-            "Error when querying information about the Bitcoin app for this device: {}.",
-            e
-        ),
-    };
-    let bitcoin_app = resp_apps
+    .send()?;
+    resp_apps
         .json::<Vec<BitcoinAppV2>>()
         // FIXME: is versionName guaranteed to be the name? What's "version" for?
         .map(|apps| {
             apps.into_iter()
                 .find(|o| o.version_name.to_lowercase() == lowercase_app_name)
-        });
-    let bitcoin_app = match bitcoin_app {
-        Ok(Some(a)) => a,
-        Ok(None) => {
-            error!("Could not get info about Bitcoin app.",);
-        }
-        Err(e) => {
-            error!(
-                "Error when deserializing response into list of Bitcoin apps info: {}",
-                e
-            );
-        }
-    };
-
-    // Now install the app by connecting through their websocket thing to their HSM. Make sure to
-    // properly escape the parameters in the request's parameter.
-    let install_ws_url = UrlSerializer::new(format!("{}/install?", BASE_SOCKET_URL))
-        .append_pair("targetId", &device_info.target_id.to_string())
-        .append_pair("perso", &bitcoin_app.perso)
-        .append_pair("deleteKey", &bitcoin_app.delete_key)
-        .append_pair("firmware", &bitcoin_app.firmware)
-        .append_pair("firmwareKey", &bitcoin_app.firmware_key)
-        .append_pair("hash", &bitcoin_app.hash)
-        .finish();
-    println!("Querying Ledger's remote HSM to install the app. You might have to confirm the operation on your device.");
-    if let Err(e) = query_via_websocket(&ledger_api, &install_ws_url) {
-        error!(
-            "Got an error when installing Bitcoin app from Ledger's remote HSM: {}.",
-            e
-        );
-    }
-    println!("Successfully installed the app.");
+        })
+        .map_err(|e| e.into())
 }
 
-fn open_app(ledger_api: &TransportNativeHID, name: &[u8]) {
+/// Open the given application on the device.
+pub fn open_bitcoin_app(
+    ledger_api: &TransportNativeHID,
+    is_testnet: bool,
+) -> Result<(), Box<dyn error::Error>> {
     let mut command = OPEN_APP_COMMAND_TEMPLATE;
-    command.data = name;
-
-    println!("Opening app on your Ledger. You might have to confirm on your device.",);
-    let resp = match ledger_api.exchange(&command) {
-        Ok(r) => r,
-        Err(e) => error!("Error opening app: {}.", e),
-    };
-    if resp.retcode() != StatusCode::OK as u16 {
-        error!("Error opening app. Ledger response: {:#x?}.", resp);
-    }
-}
-
-fn main() {
-    let command = if let Some(cmd) = Command::get() {
-        cmd
+    command.data = if is_testnet {
+        b"Bitcoin Test"
     } else {
-        error!("Invalid or no command specified. The command must be passed through the LEDGER_COMMAND env var. Set LEDGER_TESTNET to use the Bitcoin testnet app instead where applicable.");
+        b"Bitcoin"
     };
 
-    let ledger_api = ledger_api();
-    match command {
-        Command::GetInfo => {
-            print_ledger_info(&ledger_api);
-        }
-        Command::GenuineCheck => {
-            genuine_check(&ledger_api);
-        }
-        Command::InstallMainApp => {
-            install_app(&ledger_api, false);
-        }
-        Command::InstallTestApp => {
-            install_app(&ledger_api, true);
-        }
-        Command::OpenMainApp => {
-            open_app(&ledger_api, b"Bitcoin");
-        }
-        Command::OpenTestApp => {
-            open_app(&ledger_api, b"Bitcoin Test");
-        }
-        Command::UpdateMainApp | Command::UpdateTestApp | Command::UpdateeFirmware => {
-            unimplemented!()
-        }
+    let resp = ledger_api.exchange(&command)?;
+    if resp.retcode() != StatusCode::OK as u16 {
+        return Err(format!("Error opening app. Ledger response: {:#x?}.", resp).into());
     }
+
+    Ok(())
 }

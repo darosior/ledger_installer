@@ -51,10 +51,13 @@ For now those commands are implemented:
 
 ### Examples
 
+This PoC is now a library. You'll have to use the `ledmanager` companion binary now to play with it.
+A minimalistic GUI should come soon.
+
 #### Checking your Ledger is genuine
 
 ```
-LEDGER_COMMAND=genuinecheck cargo run
+LEDGER_COMMAND=genuinecheck cargo run --bin ledmanager
 ```
 ```
 Querying Ledger's remote HSM to perform the genuine check. You might have to confirm the operation on your device.
@@ -64,7 +67,7 @@ Success. Your Ledger is genuine.
 #### Installing the Bitcoin Test app on your Ledger
 
 ```
-LEDGER_TESTNET=1 LEDGER_COMMAND=installapp cargo run
+LEDGER_TESTNET=1 LEDGER_COMMAND=installapp cargo run --bin ledmanager
 ```
 ```
 Querying installed applications from your Ledger. You might have to confirm on your device.
