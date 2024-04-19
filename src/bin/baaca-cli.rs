@@ -1,10 +1,9 @@
-use ledger_manager::{
-    bitcoin_app, list_installed_apps, query_via_websocket, DeviceInfo, FirmwareInfo,
-    BASE_SOCKET_URL, open_bitcoin_app
-};
-
 use std::{env, process};
 
+use baaca::ledger::{
+    bitcoin_app, list_installed_apps, open_bitcoin_app, query_via_websocket, DeviceInfo,
+    FirmwareInfo, BASE_SOCKET_URL,
+};
 use form_urlencoded::Serializer as UrlSerializer;
 use ledger_transport_hidapi::{hidapi::HidApi, TransportNativeHID};
 
@@ -26,7 +25,7 @@ enum Command {
     InstallTestApp,
     UpdateTestApp,
     OpenTestApp,
-    UpdateeFirmware,
+    UpdateFirmware,
 }
 
 impl Command {
@@ -58,7 +57,7 @@ impl Command {
                 Self::OpenMainApp
             })
         } else if cmd_str == "updatefirm" {
-            Some(Self::UpdateeFirmware)
+            Some(Self::UpdateFirmware)
         } else {
             None
         }
@@ -77,7 +76,7 @@ fn ledger_api() -> TransportNativeHID {
 }
 
 fn device_info(ledger_api: &TransportNativeHID) -> DeviceInfo {
-    match DeviceInfo::new(&ledger_api) {
+    match DeviceInfo::new(ledger_api) {
         Ok(i) => i,
         Err(e) => error!("Error fetching device info: {}. Is the Ledger unlocked?", e),
     }
@@ -88,7 +87,7 @@ fn print_ledger_info(ledger_api: &TransportNativeHID) {
     println!("Information about the device: {:#?}", device_info);
 
     println!("Querying installed applications from your Ledger. You might have to confirm on your device.");
-    let apps = match list_installed_apps(&ledger_api) {
+    let apps = match list_installed_apps(ledger_api) {
         Ok(a) => a,
         Err(e) => error!("Error listing installed applications: {}.", e),
     };
@@ -107,7 +106,7 @@ fn genuine_check(ledger_api: &TransportNativeHID) {
         .append_pair("targetId", &device_info.target_id.to_string())
         .append_pair("perso", &firmware_info.perso)
         .finish();
-    if let Err(e) = query_via_websocket(&ledger_api, &genuine_ws_url) {
+    if let Err(e) = query_via_websocket(ledger_api, &genuine_ws_url) {
         error!("Error when performing genuine check: {}.", e);
     }
     println!("Success. Your Ledger is genuine.");
@@ -122,7 +121,7 @@ fn install_app(ledger_api: &TransportNativeHID, is_testnet: bool) {
     } else {
         "bitcoin"
     };
-    let apps = match list_installed_apps(&ledger_api) {
+    let apps = match list_installed_apps(ledger_api) {
         Ok(a) => a,
         Err(e) => error!("Error listing installed applications: {}.", e),
     };
@@ -151,7 +150,7 @@ fn install_app(ledger_api: &TransportNativeHID, is_testnet: bool) {
         .append_pair("hash", &bitcoin_app.hash)
         .finish();
     println!("Querying Ledger's remote HSM to install the app. You might have to confirm the operation on your device.");
-    if let Err(e) = query_via_websocket(&ledger_api, &install_ws_url) {
+    if let Err(e) = query_via_websocket(ledger_api, &install_ws_url) {
         error!(
             "Got an error when installing Bitcoin app from Ledger's remote HSM: {}.",
             e
@@ -193,7 +192,7 @@ fn main() {
         Command::OpenTestApp => {
             open_app(&ledger_api, true);
         }
-        Command::UpdateMainApp | Command::UpdateTestApp | Command::UpdateeFirmware => {
+        Command::UpdateMainApp | Command::UpdateTestApp | Command::UpdateFirmware => {
             unimplemented!()
         }
     }
