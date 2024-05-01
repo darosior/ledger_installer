@@ -167,30 +167,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1fdabc7756949593fe60f30ec81974b613357de856987752631dea1e3394c80"
 
 [[package]]
-name = "baaca"
-version = "0.1.0"
-dependencies = [
- "async-channel",
- "chrono",
- "colored",
- "console_log",
- "fern",
- "form_urlencoded",
- "hex",
- "iced",
- "iced_runtime",
- "ledger-apdu",
- "ledger-transport-hidapi",
- "log",
- "minreq",
- "serde",
- "serde_derive",
- "serde_json",
- "tokio",
- "tungstenite",
-]
-
-[[package]]
 name = "backtrace"
 version = "0.3.71"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1710,6 +1686,46 @@ dependencies = [
  "libc",
  "log",
  "thiserror",
+]
+
+[[package]]
+name = "ledger_manager"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "ledger-apdu",
+ "ledger-transport-hidapi",
+ "log",
+ "minreq",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "tungstenite",
+]
+
+[[package]]
+name = "ledger_manager_cli"
+version = "0.1.0"
+dependencies = [
+ "form_urlencoded",
+ "ledger_manager",
+]
+
+[[package]]
+name = "ledger_manager_gui"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "chrono",
+ "colored",
+ "console_log",
+ "fern",
+ "form_urlencoded",
+ "iced",
+ "iced_runtime",
+ "ledger_manager",
+ "log",
+ "tokio",
 ]
 
 [[package]]

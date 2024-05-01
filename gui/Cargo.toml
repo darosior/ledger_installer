@@ -1,0 +1,22 @@
+[package]
+name = "ledger_manager_gui"
+version = "0.1.0"
+authors = ["Pythcoiner <pythcoiner@proton.me>"]
+
+edition.workspace = true
+license-file.workspace = true
+readme.workspace = true
+
+[dependencies]
+ledger_manager = { path = "../ledger_manager" }
+
+iced_runtime = "0.12.1"
+iced = { version = "0.12.1",default-features = false, features = ["webgl", "image"] }
+tokio = { version = "1.37.0", features = ["time", "rt", "rt-multi-thread", "macros"] }
+async-channel = "2.2.0"
+log = "0.4.21"
+console_log = "1.0"
+fern = "0.6.2"
+chrono = "0.4.33"
+colored = "2.1.0"
+form_urlencoded = "1.2.1"
