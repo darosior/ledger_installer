@@ -427,6 +427,21 @@ pub fn list_installed_apps(
     Ok(installed_apps)
 }
 
+/// Whether the Bitcoin app is installed on this device.
+pub fn is_bitcoin_app_installed(
+    ledger_api: &TransportNativeHID,
+    is_testnet: bool,
+) -> Result<bool, Box<dyn error::Error>> {
+    let lowercase_app_name = if is_testnet {
+        "bitcoin test"
+    } else {
+        "bitcoin"
+    };
+    Ok(list_installed_apps(ledger_api)?
+        .iter()
+        .any(|app| app.name.to_lowercase() == lowercase_app_name))
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct DeviceVersion {
     pub id: i64,

@@ -2,7 +2,7 @@ use std::{env, process};
 
 use form_urlencoded::Serializer as UrlSerializer;
 use ledger_manager::{
-    bitcoin_app,
+    bitcoin_app, is_bitcoin_app_installed,
     ledger_transport_hidapi::{hidapi::HidApi, TransportNativeHID},
     list_installed_apps, open_bitcoin_app, query_via_websocket, DeviceInfo, FirmwareInfo,
     BASE_SOCKET_URL,
@@ -117,20 +117,10 @@ fn genuine_check(ledger_api: &TransportNativeHID) {
 fn install_app(ledger_api: &TransportNativeHID, is_testnet: bool) {
     // First of all make sure it's not already installed.
     println!("Querying installed applications from your Ledger. You might have to confirm on your device.");
-    let lowercase_app_name = if is_testnet {
-        "bitcoin test"
-    } else {
-        "bitcoin"
-    };
-    let apps = match list_installed_apps(ledger_api) {
-        Ok(a) => a,
+    match is_bitcoin_app_installed(ledger_api, is_testnet) {
         Err(e) => error!("Error listing installed applications: {}.", e),
-    };
-    if apps
-        .iter()
-        .any(|app| app.name.to_lowercase() == lowercase_app_name)
-    {
-        error!("Bitcoin app already installed. Use the update command to update it.");
+        Ok(true) => error!("Bitcoin app already installed. Use the update command to update it."),
+        Ok(false) => {}
     }
 
     let device_info = device_info(ledger_api);
