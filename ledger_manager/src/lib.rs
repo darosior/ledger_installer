@@ -575,7 +575,7 @@ pub fn bitcoin_app(
         minreq::Method::Get,
         format!("{}/apps/by-target", BASE_API_V2_URL),
     )
-    .with_param("livecommonversion", "34.0.0")
+    .with_param("livecommonversion", LIVE_COMMON_VERSION)
     .with_param("provider", PROVIDER.to_string()) // TODO: allow to configure the provider
     .with_param("target_id", device_info.target_id.to_string())
     .with_param("firmware_version_name", device_info.version.clone())
