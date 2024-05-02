@@ -3,7 +3,7 @@ use std::{env, process};
 use ledger_manager::{
     genuine_check, install_bitcoin_app,
     ledger_transport_hidapi::{hidapi::HidApi, TransportNativeHID},
-    list_installed_apps, open_bitcoin_app, DeviceInfo, InstallErr,
+    list_installed_apps, open_bitcoin_app, update_bitcoin_app, DeviceInfo, InstallErr, UpdateErr,
 };
 
 // Print on stderr and exit with 1.
@@ -77,7 +77,7 @@ fn ledger_api() -> TransportNativeHID {
 fn device_info(ledger_api: &TransportNativeHID) -> DeviceInfo {
     match DeviceInfo::new(ledger_api) {
         Ok(i) => i,
-        Err(e) => error!("Error fetching device info: {}. Is the Ledger unlocked?", e),
+        Err(e) => error!("Error fetching device info: {}", e),
     }
 }
 
@@ -117,6 +117,19 @@ fn install_app(ledger_api: &TransportNativeHID, is_testnet: bool) {
     }
 }
 
+fn update_app(ledger_api: &TransportNativeHID, is_testnet: bool) {
+    println!("You may have to allow on your device 1) listing installed apps 2) the Ledger manager to install the app.");
+    match update_bitcoin_app(ledger_api, is_testnet) {
+        Ok(()) => println!("Successfully updated the app."),
+        Err(UpdateErr::NotInstalled) => {
+            error!("Bitcoin app isn't installed. Use the install command instead.")
+        }
+        Err(UpdateErr::AppNotFound) => error!("Could not get info about Bitcoin app."),
+        Err(UpdateErr::AlreadyLatest) => error!("Bitcoin app is already at the latest version."),
+        Err(UpdateErr::Any(e)) => error!("Error installing Bitcoin app: {}.", e),
+    }
+}
+
 fn open_app(ledger_api: &TransportNativeHID, is_testnet: bool) {
     if let Err(e) = open_bitcoin_app(ledger_api, is_testnet) {
         error!("Error opening Bitcoin app: {}", e);
@@ -150,7 +163,13 @@ fn main() {
         Command::OpenTestApp => {
             open_app(&ledger_api, true);
         }
-        Command::UpdateMainApp | Command::UpdateTestApp | Command::UpdateFirmware => {
+        Command::UpdateMainApp => {
+            update_app(&ledger_api, false);
+        }
+        Command::UpdateTestApp => {
+            update_app(&ledger_api, true);
+        }
+        Command::UpdateFirmware => {
             unimplemented!()
         }
     }

@@ -379,7 +379,7 @@ pub fn query_via_websocket(
 }
 
 /// Get a list of applications installed on this device.
-pub fn list_installed_apps(
+pub fn list_installed_apps_raw(
     ledger_api: &TransportNativeHID,
 ) -> Result<Vec<InstalledApp>, Box<dyn error::Error>> {
     let mut answer = ledger_api.exchange(&LIST_APPS_COMMAND)?;
@@ -435,19 +435,39 @@ pub fn list_installed_apps(
     Ok(installed_apps)
 }
 
-/// Whether the Bitcoin app is installed on this device.
-pub fn is_bitcoin_app_installed(
+/// Get the metadata of the applications installed on the device. This calls the Ledger API, to
+/// only get the data available from the device see `list_installed_apps_raw`.
+pub fn list_installed_apps(
+    ledger_api: &TransportNativeHID,
+) -> Result<Vec<Option<BitcoinAppV2>>, Box<dyn error::Error>> {
+    let hashes = list_installed_apps_raw(ledger_api)?
+        .into_iter()
+        .map(|a| a.hash)
+        .collect();
+    bitcoin_apps_by_hashes(hashes)
+}
+
+/// Get the installed Bitcoin app, if any. Set `is_testnet` to look for the testnet Bitcoin app.
+pub fn bitcoin_app_installed(
     ledger_api: &TransportNativeHID,
     is_testnet: bool,
-) -> Result<bool, Box<dyn error::Error>> {
+) -> Result<Option<InstalledApp>, Box<dyn error::Error>> {
     let lowercase_app_name = if is_testnet {
         "bitcoin test"
     } else {
         "bitcoin"
     };
-    Ok(list_installed_apps(ledger_api)?
-        .iter()
-        .any(|app| app.name.to_lowercase() == lowercase_app_name))
+    Ok(list_installed_apps_raw(ledger_api)?
+        .into_iter()
+        .find(|app| app.name.to_lowercase() == lowercase_app_name))
+}
+
+/// Whether the Bitcoin app is installed on this device.
+pub fn is_bitcoin_app_installed(
+    ledger_api: &TransportNativeHID,
+    is_testnet: bool,
+) -> Result<bool, Box<dyn error::Error>> {
+    Ok(bitcoin_app_installed(ledger_api, is_testnet)?.is_some())
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -545,6 +565,9 @@ impl FirmwareInfo {
 pub struct BitcoinAppV2 {
     #[serde(rename = "versionName")]
     pub version_name: String,
+    #[serde(rename = "versionId")]
+    pub version_id: u32,
+    pub version: String,
     pub perso: String,
     #[serde(rename = "deleteKey")]
     pub delete_key: String,
@@ -554,8 +577,25 @@ pub struct BitcoinAppV2 {
     pub hash: String,
 }
 
-/// Get the Bitcoin app information for this device. Set `is_testnet` to `true` to get the Test app
-/// instead.
+// Returns a Vec of Options as some elements in the response's JSON array may be `null`.
+/// Get metadata about a list of Bitcoin apps identified by their hash.
+pub fn bitcoin_apps_by_hashes(
+    hashes: Vec<Vec<u8>>,
+) -> Result<Vec<Option<BitcoinAppV2>>, Box<dyn error::Error>> {
+    let hashes_hex: Vec<_> = hashes.into_iter().map(|h| hex::encode(&h).into()).collect();
+    let resp_apps = minreq::Request::new(
+        minreq::Method::Post,
+        format!("{}/apps/hash", BASE_API_V2_URL),
+    )
+    .with_param("livecommonversion", LIVE_COMMON_VERSION)
+    .with_json(&serde_json::Value::Array(hashes_hex))?
+    .send()?;
+    Ok(resp_apps.json::<Vec<_>>()?.into_iter().collect())
+}
+
+// TODO: rename this to "latest app" or something.
+/// Get the Bitcoin app information for this device from the "catalog" (as Ledger Live calls it).
+/// Set `is_testnet` to `true` to get the Test app instead.
 // This uses the v2 API. See for reference:
 // - https://github.com/LedgerHQ/ledger-live/blob/5a0a1aa5dc183116839851b79bceb6704f1de4b9/libs/ledger-live-common/src/apps/listApps/v2.ts
 // - https://github.com/LedgerHQ/ledger-live/blob/5a0a1aa5dc183116839851b79bceb6704f1de4b9/libs/device-core/src/managerApi/repositories/HttpManagerApiRepository.ts#L211
@@ -584,6 +624,8 @@ pub fn bitcoin_app(
         .json::<Vec<BitcoinAppV2>>()
         // FIXME: is versionName guaranteed to be the name? What's "version" for?
         .map(|apps| {
+            // NOTE: using find() here is fine because the catalog only contains the latest version
+            // of the app, so there is no duplicate.
             apps.into_iter()
                 .find(|o| o.version_name.to_lowercase() == lowercase_app_name)
         })
@@ -632,6 +674,23 @@ pub enum InstallErr {
     Any(Box<dyn error::Error>),
 }
 
+fn install_app(
+    ledger_api: &TransportNativeHID,
+    device_info: &DeviceInfo,
+    app: &BitcoinAppV2,
+) -> Result<(), Box<dyn error::Error>> {
+    // Make sure to properly escape the parameters in the request's parameter.
+    let install_ws_url = UrlSerializer::new(format!("{}/install?", BASE_SOCKET_URL))
+        .append_pair("targetId", &device_info.target_id.to_string())
+        .append_pair("perso", &app.perso)
+        .append_pair("deleteKey", &app.delete_key)
+        .append_pair("firmware", &app.firmware)
+        .append_pair("firmwareKey", &app.firmware_key)
+        .append_pair("hash", &app.hash)
+        .finish();
+    query_via_websocket(ledger_api, &install_ws_url)
+}
+
 /// Install the Bitcoin application on this device. Set `is_testnet` to `true` to install the
 /// testnet app instead.
 pub fn install_bitcoin_app(
@@ -649,17 +708,58 @@ pub fn install_bitcoin_app(
         .map_err(InstallErr::Any)?
         .ok_or(InstallErr::AppNotFound)?;
 
-    // Now install the app by connecting through their websocket thing to their HSM. Make sure to
-    // properly escape the parameters in the request's parameter.
-    let install_ws_url = UrlSerializer::new(format!("{}/install?", BASE_SOCKET_URL))
-        .append_pair("targetId", &device_info.target_id.to_string())
-        .append_pair("perso", &bitcoin_app.perso)
-        .append_pair("deleteKey", &bitcoin_app.delete_key)
-        .append_pair("firmware", &bitcoin_app.firmware)
-        .append_pair("firmwareKey", &bitcoin_app.firmware_key)
-        .append_pair("hash", &bitcoin_app.hash)
-        .finish();
-    query_via_websocket(ledger_api, &install_ws_url).map_err(InstallErr::Any)?;
+    // Now install the app by connecting through their websocket thing to their HSM.
+    install_app(ledger_api, &device_info, &bitcoin_app).map_err(InstallErr::Any)?;
+
+    Ok(())
+}
+
+/// An error arising when updating the Bitcoin app.
+#[derive(Debug)]
+pub enum UpdateErr {
+    /// The Bitcoin application is not installed yet.
+    NotInstalled,
+    /// Couldn't get info about the Bitcoin app.
+    AppNotFound,
+    /// The installed app is already the latest.
+    AlreadyLatest,
+    Any(Box<dyn error::Error>),
+}
+
+/// Update the Bitcoin application on this device. Set `is_testnet` to `true` to install the
+/// testnet app instead.
+pub fn update_bitcoin_app(
+    ledger_api: &TransportNativeHID,
+    is_testnet: bool,
+) -> Result<(), UpdateErr> {
+    // First of all make sure the app is installed. Get its details.
+    let app = bitcoin_app_installed(ledger_api, is_testnet)
+        .map_err(UpdateErr::Any)?
+        .ok_or(UpdateErr::NotInstalled)?;
+    let installed_app = bitcoin_apps_by_hashes(vec![app.hash])
+        .map_err(UpdateErr::Any)?
+        .into_iter()
+        .next()
+        .ok_or(UpdateErr::AppNotFound)?;
+
+    // Get the latest app info, necessary for the websocket query below.
+    let device_info = DeviceInfo::new(ledger_api).map_err(UpdateErr::Any)?;
+    let latest_app = bitcoin_app(&device_info, is_testnet)
+        .map_err(UpdateErr::Any)?
+        .ok_or(UpdateErr::AppNotFound)?;
+
+    // It doesn't make a whole lot of sense to not check the version is indeed superior to the
+    // version of the installed app. But this is the check Ledger Live does. And it also never uses
+    // versionId as far as i can tell. So, do like Ledger.
+    if installed_app
+        .map(|app| app.version == latest_app.version)
+        .unwrap_or(false)
+    {
+        return Err(UpdateErr::AlreadyLatest);
+    }
+
+    // Now install the app by connecting through their websocket thing to their HSM.
+    install_app(ledger_api, &device_info, &latest_app).map_err(UpdateErr::Any)?;
 
     Ok(())
 }
