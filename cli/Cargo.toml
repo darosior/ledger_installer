@@ -9,4 +9,3 @@ readme.workspace = true
 
 [dependencies]
 ledger_manager = { path = "../ledger_manager" }
-form_urlencoded = "1.2.1"

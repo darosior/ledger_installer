@@ -1692,6 +1692,7 @@ dependencies = [
 name = "ledger_manager"
 version = "0.1.0"
 dependencies = [
+ "form_urlencoded",
  "hex",
  "ledger-apdu",
  "ledger-transport-hidapi",
@@ -1707,7 +1708,6 @@ dependencies = [
 name = "ledger_manager_cli"
 version = "0.1.0"
 dependencies = [
- "form_urlencoded",
  "ledger_manager",
 ]
 

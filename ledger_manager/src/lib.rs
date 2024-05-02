@@ -1,6 +1,7 @@
 pub use ledger_apdu;
 pub use ledger_transport_hidapi;
 
+use form_urlencoded::Serializer as UrlSerializer;
 use ledger_apdu::APDUCommand;
 use ledger_transport_hidapi::TransportNativeHID;
 use serde_derive::Deserialize;
@@ -76,7 +77,7 @@ pub enum StatusCode {
     //INVALID_KCV = 0x9485,
     //INVALID_OFFSET = 0x9402,
     //LICENSING = 0x6f42,
-    //LOCKED_DEVICE = 0x5515,
+    LockedDevice = 0x5515,
     //MAX_VALUE_REACHED = 0x9850,
     //MEMORY_PROBLEM = 0x9240,
     //MISSING_CRITICAL_PARAMETER = 0x6800,
@@ -111,6 +112,13 @@ impl DeviceInfo {
     /// Adapted from https://github.com/LedgerHQ/ledger-live/blob/dd1d17fd3ce7ed42558204b2f93707fb9b1599de/libs/device-core/src/commands/use-cases/parseGetVersionResponse.ts
     pub fn new(ledger_api: &TransportNativeHID) -> Result<Self, Box<dyn error::Error>> {
         let ver_answer = ledger_api.exchange(&GET_VERSION_COMMAND)?;
+        let ret = ver_answer.retcode();
+        if ret == StatusCode::LockedDevice as u16 {
+            return Err("Device is locked.".into());
+        } else if ret != StatusCode::OK as u16 {
+            return Err(format!("Device isn't ready. Return code: {}.", ret).into());
+        }
+
         let data = ver_answer.data();
         let mut i = 0;
 
@@ -598,6 +606,60 @@ pub fn open_bitcoin_app(
     if resp.retcode() != StatusCode::OK as u16 {
         return Err(format!("Error opening app. Ledger response: {:#x?}.", resp).into());
     }
+
+    Ok(())
+}
+
+/// Check whether the Ledger device is genuine.
+pub fn genuine_check(ledger_api: &TransportNativeHID) -> Result<(), Box<dyn error::Error>> {
+    let device_info = DeviceInfo::new(ledger_api)?;
+    let firmware_info = FirmwareInfo::from_device(&device_info);
+
+    let genuine_ws_url = UrlSerializer::new(format!("{}/genuine?", BASE_SOCKET_URL))
+        .append_pair("targetId", &device_info.target_id.to_string())
+        .append_pair("perso", &firmware_info.perso)
+        .finish();
+    query_via_websocket(ledger_api, &genuine_ws_url)
+}
+
+/// An error arising when installing the Bitcoin app.
+#[derive(Debug)]
+pub enum InstallErr {
+    /// The Bitcoin application is already installed.
+    AlreadyInstalled,
+    /// Couldn't get info about the Bitcoin app.
+    AppNotFound,
+    Any(Box<dyn error::Error>),
+}
+
+/// Install the Bitcoin application on this device. Set `is_testnet` to `true` to install the
+/// testnet app instead.
+pub fn install_bitcoin_app(
+    ledger_api: &TransportNativeHID,
+    is_testnet: bool,
+) -> Result<(), InstallErr> {
+    // First of all make sure it's not already installed.
+    if is_bitcoin_app_installed(ledger_api, is_testnet).map_err(InstallErr::Any)? {
+        return Err(InstallErr::AlreadyInstalled);
+    }
+
+    // Get the app info, necessary for the websocket query below.
+    let device_info = DeviceInfo::new(ledger_api).map_err(InstallErr::Any)?;
+    let bitcoin_app = bitcoin_app(&device_info, is_testnet)
+        .map_err(InstallErr::Any)?
+        .ok_or(InstallErr::AppNotFound)?;
+
+    // Now install the app by connecting through their websocket thing to their HSM. Make sure to
+    // properly escape the parameters in the request's parameter.
+    let install_ws_url = UrlSerializer::new(format!("{}/install?", BASE_SOCKET_URL))
+        .append_pair("targetId", &device_info.target_id.to_string())
+        .append_pair("perso", &bitcoin_app.perso)
+        .append_pair("deleteKey", &bitcoin_app.delete_key)
+        .append_pair("firmware", &bitcoin_app.firmware)
+        .append_pair("firmwareKey", &bitcoin_app.firmware_key)
+        .append_pair("hash", &bitcoin_app.hash)
+        .finish();
+    query_via_websocket(ledger_api, &install_ws_url).map_err(InstallErr::Any)?;
 
     Ok(())
 }

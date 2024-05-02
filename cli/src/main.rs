@@ -1,11 +1,9 @@
 use std::{env, process};
 
-use form_urlencoded::Serializer as UrlSerializer;
 use ledger_manager::{
-    bitcoin_app, is_bitcoin_app_installed,
+    genuine_check, install_bitcoin_app,
     ledger_transport_hidapi::{hidapi::HidApi, TransportNativeHID},
-    list_installed_apps, open_bitcoin_app, query_via_websocket, DeviceInfo, FirmwareInfo,
-    BASE_SOCKET_URL,
+    list_installed_apps, open_bitcoin_app, DeviceInfo, InstallErr,
 };
 
 // Print on stderr and exit with 1.
@@ -98,56 +96,25 @@ fn print_ledger_info(ledger_api: &TransportNativeHID) {
     }
 }
 
-fn genuine_check(ledger_api: &TransportNativeHID) {
-    let device_info = device_info(ledger_api);
-    let firmware_info = FirmwareInfo::from_device(&device_info);
-
+fn perform_genuine_check(ledger_api: &TransportNativeHID) {
     println!("Querying Ledger's remote HSM to perform the genuine check. You might have to confirm the operation on your device.");
-    let genuine_ws_url = UrlSerializer::new(format!("{}/genuine?", BASE_SOCKET_URL))
-        .append_pair("targetId", &device_info.target_id.to_string())
-        .append_pair("perso", &firmware_info.perso)
-        .finish();
-    if let Err(e) = query_via_websocket(ledger_api, &genuine_ws_url) {
-        error!("Error when performing genuine check: {}.", e);
+    if let Err(e) = genuine_check(ledger_api) {
+        error!("Error when performing genuine check: {}", e);
     }
     println!("Success. Your Ledger is genuine.");
 }
 
 // Install the Bitcoin app on the device.
 fn install_app(ledger_api: &TransportNativeHID, is_testnet: bool) {
-    // First of all make sure it's not already installed.
-    println!("Querying installed applications from your Ledger. You might have to confirm on your device.");
-    match is_bitcoin_app_installed(ledger_api, is_testnet) {
-        Err(e) => error!("Error listing installed applications: {}.", e),
-        Ok(true) => error!("Bitcoin app already installed. Use the update command to update it."),
-        Ok(false) => {}
+    println!("You may have to allow on your device 1) listing installed apps 2) the Ledger manager to install the app.");
+    match install_bitcoin_app(ledger_api, is_testnet) {
+        Ok(()) => println!("Successfully installed the app."),
+        Err(InstallErr::AlreadyInstalled) => {
+            error!("Bitcoin app already installed. Use the update command to update it.")
+        }
+        Err(InstallErr::AppNotFound) => error!("Could not get info about Bitcoin app."),
+        Err(InstallErr::Any(e)) => error!("Error installing Bitcoin app: {}.", e),
     }
-
-    let device_info = device_info(ledger_api);
-    let bitcoin_app = match bitcoin_app(&device_info, is_testnet) {
-        Ok(Some(a)) => a,
-        Ok(None) => error!("Could not get info about Bitcoin app.",),
-        Err(e) => error!("Error querying info about Bitcoin app: {}.", e),
-    };
-
-    // Now install the app by connecting through their websocket thing to their HSM. Make sure to
-    // properly escape the parameters in the request's parameter.
-    let install_ws_url = UrlSerializer::new(format!("{}/install?", BASE_SOCKET_URL))
-        .append_pair("targetId", &device_info.target_id.to_string())
-        .append_pair("perso", &bitcoin_app.perso)
-        .append_pair("deleteKey", &bitcoin_app.delete_key)
-        .append_pair("firmware", &bitcoin_app.firmware)
-        .append_pair("firmwareKey", &bitcoin_app.firmware_key)
-        .append_pair("hash", &bitcoin_app.hash)
-        .finish();
-    println!("Querying Ledger's remote HSM to install the app. You might have to confirm the operation on your device.");
-    if let Err(e) = query_via_websocket(ledger_api, &install_ws_url) {
-        error!(
-            "Got an error when installing Bitcoin app from Ledger's remote HSM: {}.",
-            e
-        );
-    }
-    println!("Successfully installed the app.");
 }
 
 fn open_app(ledger_api: &TransportNativeHID, is_testnet: bool) {
@@ -169,7 +136,7 @@ fn main() {
             print_ledger_info(&ledger_api);
         }
         Command::GenuineCheck => {
-            genuine_check(&ledger_api);
+            perform_genuine_check(&ledger_api);
         }
         Command::InstallMainApp => {
             install_app(&ledger_api, false);
