@@ -77,7 +77,7 @@ fn ledger_api() -> TransportNativeHID {
 fn device_info(ledger_api: &TransportNativeHID) -> DeviceInfo {
     match DeviceInfo::new(ledger_api) {
         Ok(i) => i,
-        Err(e) => error!("Error fetching device info: {}. Is the Ledger unlocked?", e),
+        Err(e) => error!("Error fetching device info: {}", e),
     }
 }
 
