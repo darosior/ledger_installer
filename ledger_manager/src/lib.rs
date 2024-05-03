@@ -1,3 +1,9 @@
+//! Ledger Manager.
+//!
+//! This implements utility functions to manage the applications installed on your Ledger device.
+//! This is performed by both talking to the Ledger device connected by USB but also by making HTTP
+//! request to the Ledger API used by Ledger Live.
+
 pub use ledger_apdu;
 pub use ledger_transport_hidapi;
 
@@ -44,12 +50,22 @@ const OPEN_APP_COMMAND_TEMPLATE: APDUCommand<&[u8]> = APDUCommand {
     data: &[],
 };
 
+/// The Ledger Live API requires request to set their claimed version of Ledger Live. This was
+/// chosen arbitrarily as a working value.
 pub const LIVE_COMMON_VERSION: &str = "34.0.0";
-pub const PROVIDER: u32 = 1; // TODO: make it possible to set it.
+
+/// The Ledger Live API has multiple channels to download binaries. This sets which one to use. 1
+/// is default. 4 is "shitcoins". The rest is unclear. Defined here:
+/// https://github.com/LedgerHQ/ledger-live/blob/4d1d7bb3462fd0c986ed587f0cf426afc96850c8/libs/device-core/src/managerApi/use-cases/getProviderIdUseCase.ts#L3-L9
+// TODO: make it possible to set it?
+pub const PROVIDER: u32 = 1;
+
 pub const BASE_API_V1_URL: &str = "https://manager.api.live.ledger.com/api";
 pub const BASE_API_V2_URL: &str = "https://manager.api.live.ledger.com/api/v2";
 pub const BASE_SOCKET_URL: &str = "wss://scriptrunner.api.live.ledger.com/update";
 
+/// The return code when sending an APDU command to a Ledger device. Taken from
+/// https://github.com/LedgerHQ/ledger-live/blob/4d1d7bb3462fd0c986ed587f0cf426afc96850c8/libs/ledgerjs/packages/errors/src/index.ts#L233
 #[derive(Debug, Clone, Copy)]
 pub enum StatusCode {
     //ACCESS_CONDITION_NOT_FULFILLED = 0x9804,
@@ -93,9 +109,9 @@ pub enum StatusCode {
     //NOT_ENOUGH_SPACE = 0x5102,
 }
 
+/// Information queried from a Ledger device.
 // NOTE: MCU target id is always == target_id in Ledger Live
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct DeviceInfo {
     pub target_id: u32,
     pub version: String,
@@ -233,7 +249,7 @@ impl DeviceInfo {
     }
 }
 
-#[allow(dead_code)]
+/// Information about an application as queried directly from the device.
 #[derive(Debug, Clone)]
 pub struct InstalledApp {
     pub name: String,
@@ -436,10 +452,10 @@ pub fn list_installed_apps_raw(
 }
 
 /// Get the metadata of the applications installed on the device. This calls the Ledger API, to
-/// only get the data available from the device see `list_installed_apps_raw`.
+/// only query the data available from the device see `list_installed_apps_raw`.
 pub fn list_installed_apps(
     ledger_api: &TransportNativeHID,
-) -> Result<Vec<Option<BitcoinAppV2>>, Box<dyn error::Error>> {
+) -> Result<Vec<Option<BitcoinAppInfo>>, Box<dyn error::Error>> {
     let hashes = list_installed_apps_raw(ledger_api)?
         .into_iter()
         .map(|a| a.hash)
@@ -513,56 +529,9 @@ impl FirmwareInfo {
     }
 }
 
-// DON'T DELETE ME JUST YET.
-// This appears to be the "old" (api v1) way of querying information about the Bitcoin app for a
-// device. It does give access to more data, so i'm keeping it around for now just in case.
-//
-// See
-// https://github.com/LedgerHQ/ledger-live/blob/99879eb5bada1ecaea7a02d8886e16b44657af6d/libs/ledger-live-common/src/manager/index.ts#L103-L104.
-//
-// See above for firmware info.
-//
-//let compatible_apps = minreq::Request::new(
-//minreq::Method::Post,
-//"https://manager.api.live.ledger.com/api/get_apps",
-//)
-//.with_param("livecommonversion", "34.0.0")
-//.with_json(&serde_json::json!({
-//"provider": PROVIDER,
-//"current_se_firmware_final_version": firmware_id,
-//"device_version": device_id,
-//}))
-//.unwrap()
-//.with_param("firmware_version_name", device_info.version)
-//.send()
-//.unwrap();
-//let bitcoin_apps: Vec<_> = compatible_apps
-//.json::<serde_json::Value>()
-//.unwrap()
-//.get("application_versions")
-//.unwrap()
-//.as_array()
-//.unwrap()
-//.into_iter()
-//.filter(|o| {
-//o.as_object()
-//.unwrap()
-//.get("name")
-//.unwrap()
-//.as_str()
-//.unwrap()
-//.to_lowercase()
-//== "bitcoin test"
-////.contains("bitcoin")
-//})
-////.inspect(|o| println!("{}", serde_json::to_string_pretty(&o).unwrap()))
-//.cloned()
-//.collect();
-//let bitcoin_app = &bitcoin_apps[0];
-//println!("{}", bitcoin_app);
-
+/// Information about a Bitcoin application as queried from the Ledger API (not the Ledger device).
 #[derive(Debug, Clone, Deserialize)]
-pub struct BitcoinAppV2 {
+pub struct BitcoinAppInfo {
     #[serde(rename = "versionName")]
     pub version_name: String,
     #[serde(rename = "versionId")]
@@ -578,10 +547,11 @@ pub struct BitcoinAppV2 {
 }
 
 // Returns a Vec of Options as some elements in the response's JSON array may be `null`.
-/// Get metadata about a list of Bitcoin apps identified by their hash.
+/// Get metadata about a list of Bitcoin apps identified by their hash. Elements returned seem to
+/// be in the same order as the hashes, with `None` for not found.
 pub fn bitcoin_apps_by_hashes(
     hashes: Vec<Vec<u8>>,
-) -> Result<Vec<Option<BitcoinAppV2>>, Box<dyn error::Error>> {
+) -> Result<Vec<Option<BitcoinAppInfo>>, Box<dyn error::Error>> {
     let hashes_hex: Vec<_> = hashes.into_iter().map(|h| hex::encode(&h).into()).collect();
     let resp_apps = minreq::Request::new(
         minreq::Method::Post,
@@ -600,11 +570,11 @@ pub fn bitcoin_apps_by_hashes(
 // - https://github.com/LedgerHQ/ledger-live/blob/5a0a1aa5dc183116839851b79bceb6704f1de4b9/libs/ledger-live-common/src/apps/listApps/v2.ts
 // - https://github.com/LedgerHQ/ledger-live/blob/5a0a1aa5dc183116839851b79bceb6704f1de4b9/libs/device-core/src/managerApi/repositories/HttpManagerApiRepository.ts#L211
 // There is also another way which seems to be the API v1 way of getting the app info. See
-// above the commented out code.
+// https://github.com/LedgerHQ/ledger-live/blob/99879eb5bada1ecaea7a02d8886e16b44657af6d/libs/ledger-live-common/src/manager/index.ts#L103-L104.
 pub fn bitcoin_app(
     device_info: &DeviceInfo,
     is_testnet: bool,
-) -> Result<Option<BitcoinAppV2>, Box<dyn error::Error>> {
+) -> Result<Option<BitcoinAppInfo>, Box<dyn error::Error>> {
     let lowercase_app_name = if is_testnet {
         "bitcoin test"
     } else {
@@ -616,12 +586,12 @@ pub fn bitcoin_app(
         format!("{}/apps/by-target", BASE_API_V2_URL),
     )
     .with_param("livecommonversion", LIVE_COMMON_VERSION)
-    .with_param("provider", PROVIDER.to_string()) // TODO: allow to configure the provider
+    .with_param("provider", PROVIDER.to_string())
     .with_param("target_id", device_info.target_id.to_string())
     .with_param("firmware_version_name", device_info.version.clone())
     .send()?;
     resp_apps
-        .json::<Vec<BitcoinAppV2>>()
+        .json::<Vec<BitcoinAppInfo>>()
         // FIXME: is versionName guaranteed to be the name? What's "version" for?
         .map(|apps| {
             // NOTE: using find() here is fine because the catalog only contains the latest version
@@ -677,7 +647,7 @@ pub enum InstallErr {
 fn install_app(
     ledger_api: &TransportNativeHID,
     device_info: &DeviceInfo,
-    app: &BitcoinAppV2,
+    app: &BitcoinAppInfo,
 ) -> Result<(), Box<dyn error::Error>> {
     // Make sure to properly escape the parameters in the request's parameter.
     let install_ws_url = UrlSerializer::new(format!("{}/install?", BASE_SOCKET_URL))
