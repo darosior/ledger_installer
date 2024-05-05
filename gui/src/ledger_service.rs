@@ -1,5 +1,6 @@
 use crate::listener;
 use crate::{gui::Message, gui::Message::LedgerServiceMsg, service::ServiceFn};
+use std::error::Error;
 
 use form_urlencoded::Serializer as UrlSerializer;
 use ledger_manager::{
@@ -17,26 +18,30 @@ listener!(LedgerListener, LedgerMessage, Message, LedgerServiceMsg);
 fn check_apps_installed<M>(
     transport: &TransportNativeHID,
     msg_callback: M,
-) -> Result<(bool, bool), ()>
+) -> Result<(Model, Version, Version), Box<dyn Error>>
 where
     M: Fn(&str, bool),
 {
     log::info!("ledger::check_apps_installed()");
     msg_callback("Querying installed apps. Please confirm on device.", false);
-    let mut mainnet = false;
-    let mut testnet = false;
+    let mut mainnet = Version::NotInstalled;
+    let mut testnet = Version::NotInstalled;
+    let mut model = Model::Unknown;
     match list_installed_apps(transport) {
         Ok(apps) => {
             log::debug!("List installed apps:");
             msg_callback("List installed apps...", false);
-            for app in apps {
-                log::debug!("  [{}]", &app.name);
-                if app.name == "Bitcoin" {
-                    mainnet = true
-                }
-                if app.name == "Bitcoin Test" {
-                    testnet = true
-                }
+            for app in apps.into_iter().flatten() {
+                    log::debug!("  [{}]", &app.version_name);
+                    if app.version_name == "Bitcoin" {
+                        mainnet = Version::Installed(app.version);
+                        model = Model::from_app_firmware(&app.firmware);
+                        log::debug!("Mainnet App installed");
+                    } else if app.version_name == "Bitcoin Test" {
+                        testnet = Version::Installed(app.version);
+                        model = Model::from_app_firmware(&app.firmware);
+                        log::debug!("Testnet App installed");
+                    }
             }
         }
         Err(e) => {
@@ -45,16 +50,10 @@ where
                 &format!("Error listing installed applications: {}.", e),
                 true,
             );
-            return Err(());
+            return Err(e);
         }
     }
-    if mainnet {
-        log::debug!("Mainnet App installed");
-    }
-    if testnet {
-        log::debug!("Testnet App installed");
-    }
-    Ok((mainnet, testnet))
+    Ok((model, mainnet, testnet))
 }
 
 fn install_app<M>(transport: &TransportNativeHID, msg_callback: M, testnet: bool)
@@ -127,59 +126,6 @@ struct VersionInfo {
     pub testnet_version: Option<Version>,
 }
 
-fn get_app_version(info: &DeviceInfo, testnet: bool) -> Result<(Model, Version), String> {
-    log::debug!("get_app_version()");
-    match bitcoin_app(info, testnet) {
-        Ok(r) => {
-            log::debug!("decoding app data");
-            // example for nano s
-            // BitcoinAppV2 { version_name: "Bitcoin Test", perso: "perso_11", delete_key: "nanos/2.1.0/bitcoin_testnet/app_2.2.1_del_key", firmware: "nanos/2.1.0/bitcoin_testnet/app_2.2.1", firmware_key: "nanos/2.1.0/bitcoin_testnet/app_2.2.1_key", hash: "7f07efc20d96faaf8c93bd179133c88d1350113169da914f88e52beb35fcdd1e" }
-            // example for nano s+
-            // BitcoinAppV2 { version_name: "Bitcoin Test", perso: "perso_11", delete_key: "nanos+/1.1.0/bitcoin_testnet/app_2.2.0-beta_del_key", firmware: "nanos+/1.1.0/bitcoin_testnet/app_2.2.0-beta", firmware_key: "nanos+/1.1.0/bitcoin_testnet/app_2.2.0-beta_key", hash: "3c6d6ebebb085da948c0211434b90bc4504a04a133b8d0621aa0ee91fd3a0b4f" }
-            if let Some(app) = r {
-                let chunks: Vec<&str> = app.firmware.split('/').collect();
-                let model = chunks.first().map(|m| m.to_string());
-                let version = chunks.last().map(|m| m.to_string());
-                if let (Some(model), Some(version)) = (model, version) {
-                    let model = if model == "nanos" {
-                        Model::NanoS
-                    } else if model == "nanos+" {
-                        Model::NanoSP
-                        // i guess `nanox` for the nano x but i don't have device to test
-                    } else if model == "nanox" {
-                        Model::NanoX
-                    } else {
-                        Model::Unknown
-                    };
-
-                    let version = if version.contains("app_") {
-                        version.replace("app_", "")
-                    } else {
-                        version
-                    };
-
-                    let version = Version::Installed(version);
-                    if testnet {
-                        log::debug!("Testnet Model{}, Version{}", model.clone(), version.clone());
-                    } else {
-                        log::debug!("Mainnet Model{}, Version{}", model.clone(), version.clone());
-                    }
-                    Ok((model, version))
-                } else {
-                    Err(format!("Failed to parse  model/version in {:?}", chunks))
-                }
-            } else {
-                log::debug!("Fail to get version info");
-                Err("Fail to get version info".to_string())
-            }
-        }
-        Err(e) => {
-            log::debug!("Fail to get version info: {}", e);
-            Err(format!("Fail to get version info: {}", e))
-        }
-    }
-}
-
 #[allow(clippy::result_unit_err)]
 fn get_version_info<V, M>(
     transport: TransportNativeHID,
@@ -214,55 +160,17 @@ where
         }
     };
 
-    if let Some(info) = info {
+    if info.is_some() {
         // if it's our first connection, we check the if apps are installed & version
         msg_callback("Querying installed apps. Please confirm on device.", false);
         if actual_device_version.is_none() && device_version.is_some() {
-            if let Ok((main_installed, test_installed)) =
-                check_apps_installed(&transport, &msg_callback)
-            {
-                // get the mainnet app version name
-                let (main_model, main_version) = if main_installed {
-                    msg_callback("Call ledger API....", false);
-                    match get_app_version(&info, true) {
-                        Ok((model, version)) => (model, version),
-                        Err(e) => {
-                            msg_callback(&e, true);
-                            (Model::Unknown, Version::None)
-                        }
-                    }
-                } else {
-                    log::debug!("Mainnet app not installed!");
-                    // self.display_message("Mainnet app not installed!", false);
-                    (Model::Unknown, Version::NotInstalled)
-                };
-
-                // get the testnet app version name
-                let (test_model, test_version) = if test_installed {
-                    msg_callback("Call ledger API....", false);
-                    match get_app_version(&info, true) {
-                        Ok((model, version)) => (model, version),
-                        Err(e) => {
-                            msg_callback(&e, false);
-                            (Model::Unknown, Version::None)
-                        }
-                    }
-                } else {
-                    log::debug!("Testnet app not installed!");
-                    (Model::Unknown, Version::NotInstalled)
-                };
-
-                let model = match (&main_model, &test_model) {
-                    (Model::Unknown, _) => test_model,
-                    _ => main_model,
-                };
-                // clear message after app version check (after app install)
+            if let Ok((model, mainnet, testnet)) = check_apps_installed(&transport, &msg_callback) {
                 msg_callback("", false);
                 return Ok(VersionInfo {
                     device_model: Some(model),
                     device_version,
-                    mainnet_version: Some(main_version),
-                    testnet_version: Some(test_version),
+                    mainnet_version: Some(mainnet),
+                    testnet_version: Some(testnet),
                 });
             } else {
                 msg_callback("Cannot check installed apps", false);
@@ -325,6 +233,28 @@ impl Display for Model {
             _ => {
                 write!(f, "")
             }
+        }
+    }
+}
+
+impl Model {
+    /// Determine device model based on BitcoinAppInfo.firmware value
+    fn from_app_firmware(value: &str) -> Self {
+        let chunks: Vec<&str> = value.split('/').collect();
+        let model = chunks.first().map(|m| m.to_string());
+        if let Some(model) = model {
+            if model == "nanos" {
+                Model::NanoS
+            } else if model == "nanos+" {
+                Model::NanoSP
+                // i guess `nanox` for the nano x but i don't have device to test
+            } else if model == "nanox" {
+                Model::NanoX
+            } else {
+                Model::Unknown
+            }
+        } else {
+            Model::Unknown
         }
     }
 }
