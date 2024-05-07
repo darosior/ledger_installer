@@ -4,7 +4,7 @@ use std::error::Error;
 
 use form_urlencoded::Serializer as UrlSerializer;
 use ledger_manager::{
-    bitcoin_app,
+    bitcoin_app, genuine_check,
     ledger_transport_hidapi::{hidapi::HidApi, TransportNativeHID},
     list_installed_apps, query_via_websocket, DeviceInfo, BASE_SOCKET_URL,
 };
@@ -32,16 +32,16 @@ where
             log::debug!("List installed apps:");
             msg_callback("List installed apps...", false);
             for app in apps.into_iter().flatten() {
-                    log::debug!("  [{}]", &app.version_name);
-                    if app.version_name == "Bitcoin" {
-                        mainnet = Version::Installed(app.version);
-                        model = Model::from_app_firmware(&app.firmware);
-                        log::debug!("Mainnet App installed");
-                    } else if app.version_name == "Bitcoin Test" {
-                        testnet = Version::Installed(app.version);
-                        model = Model::from_app_firmware(&app.firmware);
-                        log::debug!("Testnet App installed");
-                    }
+                log::debug!("  [{}]", &app.version_name);
+                if app.version_name == "Bitcoin" {
+                    mainnet = Version::Installed(app.version);
+                    model = Model::from_app_firmware(&app.firmware);
+                    log::debug!("Mainnet App installed");
+                } else if app.version_name == "Bitcoin Test" {
+                    testnet = Version::Installed(app.version);
+                    model = Model::from_app_firmware(&app.firmware);
+                    log::debug!("Testnet App installed");
+                }
             }
         }
         Err(e) => {
@@ -187,7 +187,7 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Version {
     Installed(String),
     NotInstalled,
@@ -268,6 +268,7 @@ pub enum LedgerMessage {
     UpdateTest,
     InstallTest,
     TryConnect,
+    GenuineCheck,
 
     Connected(Option<String>, Option<String>),
     MainAppVersion(Version),
@@ -277,6 +278,7 @@ pub enum LedgerMessage {
     #[allow(unused)]
     TestAppNextVersion(Version),
     DisplayMessage(String, bool),
+    DeviceIsGenuine(Option<bool>),
 }
 
 pub struct LedgerService {
@@ -297,6 +299,7 @@ impl LedgerService {
     /// Send a LedgerMessage to the GUI via async-channel
     fn send_to_gui(&self, msg: LedgerMessage) {
         let sender = self.sender.clone();
+        log::info!("LedgerService::send_to_gui({:?})", &msg);
         tokio::spawn(async move {
             if sender.send(msg).await.is_err() {
                 log::debug!("LedgerService.send_to_gui() -> Fail to send Message")
@@ -317,6 +320,7 @@ impl LedgerService {
             LedgerMessage::InstallMain => self.install_main(),
             LedgerMessage::UpdateTest => self.update_test(),
             LedgerMessage::InstallTest => self.install_test(),
+            LedgerMessage::GenuineCheck => self.genuine_check(),
             _ => {
                 log::debug!("LedgerService.handle_message({:?}) -> unhandled!", msg)
             }
@@ -438,6 +442,32 @@ impl LedgerService {
 
     fn update_test(&mut self) {
         self.install(true);
+    }
+
+    fn genuine_check(&mut self) {
+        log::info!("LedgerService::genuine_check()");
+        if let Some(transport) = self.connect() {
+            self.send_to_gui(LedgerMessage::DisplayMessage(
+                "Check if device genuine...".to_string(),
+                false,
+            ));
+            log::info!("Check if device genuine...");
+            if let Err(e) = genuine_check(&transport) {
+                self.send_to_gui(LedgerMessage::DisplayMessage(e.to_string(), true));
+                self.send_to_gui(LedgerMessage::DeviceIsGenuine(None));
+            } else {
+                self.send_to_gui(LedgerMessage::DisplayMessage("".to_string(), false));
+                self.send_to_gui(LedgerMessage::DeviceIsGenuine(Some(true)));
+            }
+        } else {
+            log::info!("Cannot connect to device!");
+            self.send_to_gui(LedgerMessage::DisplayMessage(
+                "Cannot connect to device!".to_string(),
+                true,
+            ));
+            self.send_to_gui(LedgerMessage::DeviceIsGenuine(None));
+        }
+        log::info!("LedgerService::genuine_check() ended!");
     }
 
     fn display_message(sender: &Sender<LedgerMessage>, msg: &str, alarm: bool) {

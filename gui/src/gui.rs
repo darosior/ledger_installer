@@ -27,6 +27,7 @@ pub enum Message {
     InstallTest,
     #[allow(unused)]
     Connect,
+    GenuineCheck,
 
     ResetAlarm,
 }
@@ -42,6 +43,8 @@ pub struct LedgerInstaller {
     test_app_version: Version,
     test_next_version: Version,
     user_message: Option<String>,
+    device_is_genuine: Option<bool>,
+    device_busy: bool,
     alarm: bool,
 }
 
@@ -70,6 +73,8 @@ impl Application for LedgerInstaller {
             test_app_version: Version::None,
             test_next_version: Version::None,
             user_message: None,
+            device_is_genuine: None,
+            device_busy: false,
             alarm: false,
         };
 
@@ -85,6 +90,7 @@ impl Application for LedgerInstaller {
         match event {
             Message::LedgerServiceMsg(ledger) => match ledger {
                 LedgerMessage::Connected(model, version) => {
+                    self.device_busy = false;
                     if model.is_none() {
                         self.main_app_version = Version::None;
                         self.main_next_version = Version::None;
@@ -94,15 +100,38 @@ impl Application for LedgerInstaller {
                     self.ledger_model = model;
                     self.ledger_version = version;
                 }
-                LedgerMessage::MainAppVersion(version) => self.main_app_version = version,
-                LedgerMessage::MainAppNextVersion(version) => self.main_next_version = version,
-                LedgerMessage::TestAppVersion(version) => self.test_app_version = version,
-                LedgerMessage::TestAppNextVersion(version) => self.test_next_version = version,
+                LedgerMessage::MainAppVersion(version) => {
+                    self.device_busy = false;
+                    self.main_app_version = version;
+                }
+                LedgerMessage::MainAppNextVersion(version) => {
+                    self.device_busy = false;
+                    self.main_next_version = version;
+                }
+                LedgerMessage::TestAppVersion(version) => {
+                    self.device_busy = false;
+                    self.test_app_version = version;
+                }
+                LedgerMessage::TestAppNextVersion(version) => {
+                    self.device_busy = false;
+                    self.test_next_version = version;
+                }
                 LedgerMessage::DisplayMessage(s, alarm) => {
+                    log::info!(
+                        "LedgerInstaller::update(DisplayMessage({}), {:?})",
+                        s,
+                        alarm
+                    );
+                    if alarm {
+                        self.device_busy = false
+                    }
                     self.user_message = Some(s);
                     self.alarm = alarm;
                 }
-
+                LedgerMessage::DeviceIsGenuine(genuine) => {
+                    self.device_is_genuine = genuine;
+                    self.device_busy = false;
+                }
                 _ => {
                     log::debug!(
                         "LedgerInstaller.update() => Unhandled message from ledger: {:?}!",
@@ -114,17 +143,29 @@ impl Application for LedgerInstaller {
                 self.alarm = false;
                 self.user_message = None;
             }
-            Message::UpdateMain => { /*self.send_ledger_msg(LedgerMessage::UpdateMain)*/ }
+            Message::UpdateMain => {
+                // self.send_ledger_msg(LedgerMessage::UpdateMain);
+                // self.device_busy = true;
+            }
             Message::InstallMain => {
                 self.main_app_version = Version::None;
                 self.test_app_version = Version::None;
+                self.device_busy = true;
                 self.send_ledger_msg(LedgerMessage::InstallMain)
             }
-            Message::UpdateTest => { /* self.send_ledger_msg(LedgerMessage::UpdateTest) */ }
+            Message::UpdateTest => {
+                // self.send_ledger_msg(LedgerMessage::UpdateTest)
+                // self.device_busy = true;
+            }
             Message::InstallTest => {
                 self.main_app_version = Version::None;
                 self.test_app_version = Version::None;
+                self.device_busy = true;
                 self.send_ledger_msg(LedgerMessage::InstallTest)
+            }
+            Message::GenuineCheck => {
+                self.device_busy = true;
+                self.send_ledger_msg(LedgerMessage::GenuineCheck)
             }
             _ => {
                 log::debug!("LedgerInstaller.update() => Unhandled message {:?}", event)
@@ -155,6 +196,7 @@ impl Application for LedgerInstaller {
             Some(app_row(
                 "Bitcoin app",
                 &self.main_app_version,
+                self.device_busy,
                 Message::UpdateMain,
                 Message::InstallMain,
             ))
@@ -166,9 +208,35 @@ impl Application for LedgerInstaller {
             Some(app_row(
                 "Testnet app",
                 &self.test_app_version,
+                self.device_busy,
                 Message::UpdateTest,
                 Message::InstallTest,
             ))
+        } else {
+            None
+        };
+        let btn_genuine_msg = if !self.device_busy
+            && self.main_app_version != Version::None
+            && self.device_is_genuine.is_none()
+        {
+            Some(Message::GenuineCheck)
+        } else {
+            None
+        };
+
+        let genuine_text = match self.device_is_genuine {
+            None => "  Check if device is genuine  ",
+            Some(false) => "  Device is NOT genuine!  ",
+            Some(true) => "  Device is genuine!  ",
+        };
+
+        let genuine_check_btn = if display_app {
+            Some(
+                Row::new()
+                    .push(Space::with_width(Length::Fill))
+                    .push(Button::new(genuine_text).on_press_maybe(btn_genuine_msg))
+                    .push(Space::with_width(Length::Fill)),
+            )
         } else {
             None
         };
@@ -212,6 +280,8 @@ impl Application for LedgerInstaller {
             .push_maybe(test_app)
             .push_maybe(reset_alarm)
             .push(Space::with_height(Length::Fill))
+            .push_maybe(genuine_check_btn)
+            .push(Space::with_height(10))
             .push_maybe(user_message)
             .push(Space::with_height(5))
             .into()
@@ -231,6 +301,7 @@ impl Application for LedgerInstaller {
 fn app_row<'a>(
     app_name: &'a str,
     version: &Version,
+    genuine_test_running: bool,
     _update_msg: Message,
     install_msg: Message,
 ) -> Row<'a, Message, Theme, Renderer> {
@@ -246,14 +317,14 @@ fn app_row<'a>(
             .horizontal_alignment(Horizontal::Center),
     );
 
-    match version {
-        Version::Installed(_) => {
+    match (version, genuine_test_running) {
+        (Version::Installed(_), false) => {
             // button = button.on_press(update_msg);
         }
-        Version::NotInstalled => {
+        (Version::NotInstalled, false) => {
             button = button.on_press(install_msg);
         }
-        Version::None => {}
+        _ => {}
     }
 
     Row::new()
