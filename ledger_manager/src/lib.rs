@@ -563,23 +563,18 @@ pub fn bitcoin_apps_by_hashes(
     Ok(resp_apps.json::<Vec<_>>()?.into_iter().collect())
 }
 
-// TODO: rename this to "latest app" or something.
-/// Get the Bitcoin app information for this device from the "catalog" (as Ledger Live calls it).
-/// Set `is_testnet` to `true` to get the Test app instead.
+/// Get the Bitcoin apps information for this device from the "catalog" (as Ledger Live calls it).
 // This uses the v2 API. See for reference:
 // - https://github.com/LedgerHQ/ledger-live/blob/5a0a1aa5dc183116839851b79bceb6704f1de4b9/libs/ledger-live-common/src/apps/listApps/v2.ts
 // - https://github.com/LedgerHQ/ledger-live/blob/5a0a1aa5dc183116839851b79bceb6704f1de4b9/libs/device-core/src/managerApi/repositories/HttpManagerApiRepository.ts#L211
 // There is also another way which seems to be the API v1 way of getting the app info. See
 // https://github.com/LedgerHQ/ledger-live/blob/99879eb5bada1ecaea7a02d8886e16b44657af6d/libs/ledger-live-common/src/manager/index.ts#L103-L104.
-pub fn bitcoin_app(
+pub fn get_latest_apps(
     device_info: &DeviceInfo,
-    is_testnet: bool,
-) -> Result<Option<BitcoinAppInfo>, Box<dyn error::Error>> {
-    let lowercase_app_name = if is_testnet {
-        "bitcoin test"
-    } else {
-        "bitcoin"
-    };
+) -> Result<(Option<BitcoinAppInfo>, Option<BitcoinAppInfo>), Box<dyn error::Error>> {
+
+    let mut bitcoin = None;
+    let mut test = None;
 
     let resp_apps = minreq::Request::new(
         minreq::Method::Get,
@@ -591,15 +586,33 @@ pub fn bitcoin_app(
     .with_param("firmware_version_name", device_info.version.clone())
     .send()?;
     resp_apps
-        .json::<Vec<BitcoinAppInfo>>()
-        // FIXME: is versionName guaranteed to be the name? What's "version" for?
-        .map(|apps| {
-            // NOTE: using find() here is fine because the catalog only contains the latest version
-            // of the app, so there is no duplicate.
-            apps.into_iter()
-                .find(|o| o.version_name.to_lowercase() == lowercase_app_name)
-        })
-        .map_err(|e| e.into())
+        .json::<Vec<BitcoinAppInfo>>()?
+        .into_iter()
+        .for_each(|app| {
+            // FIXME: is versionName guaranteed to be the name? What's "version" for?
+            if app.version_name.to_lowercase() == "bitcoin" {
+                bitcoin = Some(app);
+            } else if app.version_name.to_lowercase() == "bitcoin test" {
+                test = Some(app);
+            }
+        });
+
+    Ok((bitcoin, test))
+}
+
+/// Get the Bitcoin app information for this device from the "catalog" (as Ledger Live calls it).
+/// Set `is_testnet` to `true` to get the Test app instead.
+pub fn bitcoin_latest_app(
+    device_info: &DeviceInfo,
+    is_testnet: bool
+) -> Result<Option<BitcoinAppInfo>, Box<dyn error::Error>> {
+    let apps = get_latest_apps(device_info)?;
+    Ok(if is_testnet {
+        apps.1
+    } else {
+        apps.0
+    }
+    )
 }
 
 /// Open the given application on the device.
@@ -674,7 +687,7 @@ pub fn install_bitcoin_app(
 
     // Get the app info, necessary for the websocket query below.
     let device_info = DeviceInfo::new(ledger_api).map_err(InstallErr::Any)?;
-    let bitcoin_app = bitcoin_app(&device_info, is_testnet)
+    let bitcoin_app = bitcoin_latest_app(&device_info, is_testnet)
         .map_err(InstallErr::Any)?
         .ok_or(InstallErr::AppNotFound)?;
 
@@ -714,7 +727,7 @@ pub fn update_bitcoin_app(
 
     // Get the latest app info, necessary for the websocket query below.
     let device_info = DeviceInfo::new(ledger_api).map_err(UpdateErr::Any)?;
-    let latest_app = bitcoin_app(&device_info, is_testnet)
+    let latest_app = bitcoin_latest_app(&device_info, is_testnet)
         .map_err(UpdateErr::Any)?
         .ok_or(UpdateErr::AppNotFound)?;
 
