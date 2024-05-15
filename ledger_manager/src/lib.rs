@@ -459,7 +459,10 @@ pub fn list_installed_apps(
     let hashes = list_installed_apps_raw(ledger_api)?
         .into_iter()
         .map(|a| a.hash)
-        .collect();
+        .collect::<Vec<_>>();
+    if hashes.is_empty() {
+        return Ok(Vec::new());
+    }
     bitcoin_apps_by_hashes(hashes)
 }
 
@@ -572,7 +575,6 @@ pub fn bitcoin_apps_by_hashes(
 pub fn get_latest_apps(
     device_info: &DeviceInfo,
 ) -> Result<(Option<BitcoinAppInfo>, Option<BitcoinAppInfo>), Box<dyn error::Error>> {
-
     let mut bitcoin = None;
     let mut test = None;
 
@@ -604,15 +606,10 @@ pub fn get_latest_apps(
 /// Set `is_testnet` to `true` to get the Test app instead.
 pub fn bitcoin_latest_app(
     device_info: &DeviceInfo,
-    is_testnet: bool
+    is_testnet: bool,
 ) -> Result<Option<BitcoinAppInfo>, Box<dyn error::Error>> {
     let apps = get_latest_apps(device_info)?;
-    Ok(if is_testnet {
-        apps.1
-    } else {
-        apps.0
-    }
-    )
+    Ok(if is_testnet { apps.1 } else { apps.0 })
 }
 
 /// Open the given application on the device.
