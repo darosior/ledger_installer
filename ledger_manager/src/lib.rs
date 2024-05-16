@@ -555,6 +555,10 @@ pub struct BitcoinAppInfo {
 pub fn bitcoin_apps_by_hashes(
     hashes: Vec<Vec<u8>>,
 ) -> Result<Vec<Option<BitcoinAppInfo>>, Box<dyn error::Error>> {
+    if hashes.is_empty() {
+        let e: Vec<Option<BitcoinAppInfo>> = Vec::new();
+        return Ok(e);
+    }
     let hashes_hex: Vec<_> = hashes.into_iter().map(|h| hex::encode(&h).into()).collect();
     let resp_apps = minreq::Request::new(
         minreq::Method::Post,

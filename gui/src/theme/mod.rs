@@ -1,12 +1,13 @@
-// this file have been cloned from https://github.com/wizardsardine/liana/pull/597
+// this file have been originally cloned from https://github.com/wizardsardine/liana/pull/597
 
-mod color;
+pub mod color;
 
 use iced::{
     application,
     widget::{
-        button, checkbox, container, pick_list, progress_bar, radio, scrollable, slider, text,
-        text_input,
+        self, button, checkbox, container, pick_list, progress_bar, radio,
+        rule::{Appearance, FillMode},
+        scrollable, slider, text, text_input,
     },
 };
 
@@ -99,6 +100,7 @@ pub enum Container {
     Custom(iced::Color),
     Notification(Notification),
     QrCode,
+    Frame,
 }
 
 impl container::StyleSheet for Theme {
@@ -144,6 +146,14 @@ impl container::StyleSheet for Theme {
                     },
                     ..container::Appearance::default()
                 },
+                Container::Frame => container::Appearance {
+                    border: iced::Border {
+                        color: color::BLACK,
+                        width: 2.0,
+                        radius: 5.0.into(),
+                    },
+                    ..container::Appearance::default()
+                },
             },
             Theme::Dark => match style {
                 Container::Transparent => container::Appearance {
@@ -181,6 +191,14 @@ impl container::StyleSheet for Theme {
                         color: color::TRANSPARENT,
                         width: 0.0,
                         radius: 25.0.into(),
+                    },
+                    ..container::Appearance::default()
+                },
+                Container::Frame => container::Appearance {
+                    border: iced::Border {
+                        color: color::WHITE,
+                        width: 2.0,
+                        radius: 5.0.into(),
                     },
                     ..container::Appearance::default()
                 },
@@ -930,6 +948,29 @@ impl slider::StyleSheet for Theme {
                 width: 2.0,
             },
             handle,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Default)]
+pub enum Rule {
+    #[default]
+    Simple,
+    Light,
+}
+
+impl widget::rule::StyleSheet for Theme {
+    type Style = Rule;
+
+    fn appearance(&self, style: &Self::Style) -> Appearance {
+        widget::rule::Appearance {
+            color: color::WHITE,
+            width: match style {
+                Rule::Simple => 2,
+                Rule::Light => 1,
+            },
+            radius: Default::default(),
+            fill_mode: FillMode::Full,
         }
     }
 }

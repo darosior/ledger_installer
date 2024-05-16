@@ -4,7 +4,7 @@ use std::error::Error;
 
 use form_urlencoded::Serializer as UrlSerializer;
 use ledger_manager::{
-    bitcoin_app, genuine_check,
+    bitcoin_latest_app, genuine_check, get_latest_apps,
     ledger_transport_hidapi::{hidapi::HidApi, TransportNativeHID},
     list_installed_apps, query_via_websocket, DeviceInfo, BASE_SOCKET_URL,
 };
@@ -29,7 +29,7 @@ where
     let mut model = Model::Unknown;
     match list_installed_apps(transport) {
         Ok(apps) => {
-            log::debug!("List installed apps:");
+            log::debug!("List installed apps:ok");
             msg_callback("List installed apps...", false);
             for app in apps.into_iter().flatten() {
                 log::debug!("  [{}]", &app.version_name);
@@ -56,6 +56,34 @@ where
     Ok((model, mainnet, testnet))
 }
 
+fn check_latest_apps<M>(
+    transport: &TransportNativeHID,
+    msg_callback: M,
+) -> Result<(Version, Version), Box<dyn Error>>
+where
+    M: Fn(&str, bool),
+{
+    log::info!("ledger::check_latest_apps()");
+    msg_callback("Querying latest apps on Ledger API...", false);
+
+    let device_info = DeviceInfo::new(transport)?;
+    let (bitcoin, test) = get_latest_apps(&device_info)?;
+
+    let bitcoin = if let Some(app) = bitcoin {
+        Version::Latest(app.version)
+    } else {
+        Version::None
+    };
+
+    let test = if let Some(app) = test {
+        Version::Latest(app.version)
+    } else {
+        Version::None
+    };
+
+    Ok((bitcoin, test))
+}
+
 fn install_app<M>(transport: &TransportNativeHID, msg_callback: M, testnet: bool)
 where
     M: Fn(&str, bool),
@@ -64,7 +92,7 @@ where
 
     msg_callback("Get device info from API...", false);
     if let Ok(device_info) = device_info(transport) {
-        let bitcoin_app = match bitcoin_app(&device_info, testnet) {
+        let bitcoin_app = match bitcoin_latest_app(&device_info, testnet) {
             Ok(Some(a)) => a,
             Ok(None) => {
                 msg_callback("Could not get info about Bitcoin app.", true);
@@ -164,16 +192,20 @@ where
         // if it's our first connection, we check the if apps are installed & version
         msg_callback("Querying installed apps. Please confirm on device.", false);
         if actual_device_version.is_none() && device_version.is_some() {
-            if let Ok((model, mainnet, testnet)) = check_apps_installed(&transport, &msg_callback) {
-                msg_callback("", false);
-                return Ok(VersionInfo {
-                    device_model: Some(model),
-                    device_version,
-                    mainnet_version: Some(mainnet),
-                    testnet_version: Some(testnet),
-                });
-            } else {
-                msg_callback("Cannot check installed apps", false);
+            match check_apps_installed(&transport, &msg_callback) {
+                Ok((model, mainnet, testnet)) => {
+                    msg_callback("", false);
+                    return Ok(VersionInfo {
+                        device_model: Some(model),
+                        device_version,
+                        mainnet_version: Some(mainnet),
+                        testnet_version: Some(testnet),
+                    });
+                }
+                Err(e) => {
+                    let msg = format!("Cannot check installed apps: {}", &*e.to_string());
+                    msg_callback(&msg, true);
+                }
             }
         }
         Ok(VersionInfo {
@@ -187,17 +219,32 @@ where
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Version {
     Installed(String),
+    Latest(String),
     NotInstalled,
     None,
+}
+
+impl Version {
+    pub fn is_none(&self) -> bool {
+        matches!(self, Version::None)
+    }
+
+    #[allow(unused)]
+    pub fn is_some(&self) -> bool {
+        !self.is_none()
+    }
 }
 
 impl Display for Version {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Version::Installed(version) => {
+                write!(f, "{}", version)
+            }
+            Version::Latest(version) => {
                 write!(f, "{}", version)
             }
             Version::NotInstalled => {
@@ -207,6 +254,12 @@ impl Display for Version {
                 write!(f, " - ")
             }
         }
+    }
+}
+
+impl PartialEq for Version {
+    fn eq(&self, other: &Self) -> bool {
+        self.to_string() == other.to_string()
     }
 }
 
@@ -261,10 +314,8 @@ impl Model {
 
 #[derive(Debug, Clone)]
 pub enum LedgerMessage {
-    #[allow(unused)]
     UpdateMain,
     InstallMain,
-    #[allow(unused)]
     UpdateTest,
     InstallTest,
     TryConnect,
@@ -272,13 +323,10 @@ pub enum LedgerMessage {
 
     Connected(Option<String>, Option<String>),
     MainAppVersion(Version),
-    #[allow(unused)]
-    MainAppNextVersion(Version),
     TestAppVersion(Version),
-    #[allow(unused)]
-    TestAppNextVersion(Version),
     DisplayMessage(String, bool),
     DeviceIsGenuine(Option<bool>),
+    LatestApps(Version, Version),
 }
 
 pub struct LedgerService {
@@ -288,6 +336,8 @@ pub struct LedgerService {
     device_version: Option<String>,
     mainnet_version: Version,
     testnet_version: Version,
+    last_mainnet: Version,
+    last_testnet: Version,
 }
 
 impl LedgerService {
@@ -344,6 +394,26 @@ impl LedgerService {
             let sender = self.sender.clone();
             log::info!("Try to poll device...");
             if let Some(transport) = self.connect() {
+                // check for latest apps on ledger catalog
+                if self.last_mainnet.is_none() || self.last_testnet.is_none() {
+                    log::info!("Query Ledger catalog...");
+                    if let Ok((bitcoin, test)) = check_latest_apps(&transport, |msg, alarm| {
+                        Self::display_message(&sender, msg, alarm)
+                    }) {
+                        self.last_mainnet = bitcoin.clone();
+                        self.last_testnet = test.clone();
+                        self.send_to_gui(LedgerMessage::LatestApps(bitcoin, test))
+                    } else {
+                        Self::display_message(
+                            &sender,
+                            "Fail to get latest apps from Ledger API!",
+                            true,
+                        )
+                    }
+                }
+
+                log::info!("Get device info...");
+                // get versions of device & apps
                 if let Ok(info) = get_version_info(
                     transport,
                     &self.device_version,
@@ -402,6 +472,10 @@ impl LedgerService {
                 self.send_to_gui(LedgerMessage::TestAppVersion(self.testnet_version.clone()));
             }
         }
+        self.send_to_gui(LedgerMessage::LatestApps(
+            self.last_mainnet.clone(),
+            self.last_testnet.clone(),
+        ))
     }
 
     fn install(&mut self, testnet: bool) {
@@ -494,6 +568,8 @@ impl ServiceFn<LedgerMessage, Sender<LedgerMessage>> for LedgerService {
             device_version: None,
             mainnet_version: Version::None,
             testnet_version: Version::None,
+            last_mainnet: Version::None,
+            last_testnet: Version::None,
         }
     }
 
