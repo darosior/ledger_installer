@@ -8,51 +8,72 @@
 
 </div>
 
-# Ledger Installer
+# Bacca
 
-Setup your Ledger signing device without having to use Ledger Live.
+Your Ledger companion.
 
-**WARNING: this is a very rudimentary proof of concept.**
+**WARNING: this is alpha software. Only use for testing.**
+
+A minimalistic software to install and upgrade the Bitcoin application on Ledger Nano S, S plus and
+X.
+
+![](./bacca_software_screenshot.png)
 
 ## Why?
 
-Ledger makes great hardware. However their software is lacking. Nowadays to simply setup your Ledger
-signing device for use with your favourite Bitcoin wallet you have to navigate through all the ads
-and **scams** (which Ledger Live recklessly nudges you toward).  Recently they even turned on the
-subscription to Ledger Recover by default. That is, when guiding a user through setting up their
-signing device they would nudge him to sign up to Ledger recover (thereby directly losing
-self-custody) as part of his "backup" process.
+Ledger makes great hardware. However their software is lacking.
 
-Having to deal with Ledger Live has been a recurring pain point for our users (for
-[Liana](https://github.com/wizardsardine/liana)). These irresponsible practices have pushed me to
-investigate offering an option to our users, and all bitcoiners, to setup a Ledger without having to
-use Ledger Live. This PoC is the first step toward this goal.
+The Ledger Nano S plus and X are secure, user-friendly and up to date with the latest Bitcoin
+technologies. They are securely accessible to beginners, while letting their users benefit from
+advancements and newer standards.
 
-Of course, Ledger [does not want to document their
-protocol](https://x.com/achow101/status/1773333790389055848) so i had to go through Ledger Live's
-confusing Javascript codebase to "reverse engineer" the parts i was interested in. Credits to Ava
-Chow for an [earlier
-investigation](https://gist.github.com/achow101/3604bf50aa622b33ad2160cc77075a8c) focused on
-upgrading the firmware which i could take inspiration from.
+Ledger Live is a cluttered software to manage your device where development resources are allocated
+toward scammy altcoins instead of making a decent Bitcoin wallet. The trajectory taken by Ledger
+Live has become increasingly worrying to me and other users of Liana: will my beneficiaries at all
+be able to navigate through the nudges toward Ponzi schemes and go through the unnecessary
+complicated procedure of setting up their device to be used with a Bitcoin wallet?
+
+This software offers a simple, straight-to-the-point, alternative.
+
+The state of this project is nowhere near the point where it can stably replace Ledger Live for
+non tech-savvy bitcoiners, yet. That said we hope to start pulling some of the functionalities into
+[Liana](https://github.com/wizardsardine/liana).
+
 
 ## Usage
 
 **This is a PoC. Use at your own risk.**
 
-For now this is a simple command line tool which can talk to a Ledger device connected by USB. The
-commands are communicated using an environment variable, `LEDGER_COMMAND`. Another env var lets you
-switch to testnet (for instance to install the test app), simply set `LEDGER_TESTNET`.
+This software can be used:
+1) Through a Graphical User Interface
+2) Through a Command Line Interface
+3) Through a Rust library for other projects to integrate some of the functionalities
+
+### GUI
+
+The recommended way to use this software is through the GUI. Simply connect your Ledger Nano S, S
+plus or X to the USB port and run:
+```
+cargo run -p ledger_manager_gui
+```
+
+We plan on releasing binaries in the future.
+
+### CLI
+
+Another way of using this is the CLI, which directly hooks up into the functionalities offered by
+the Rust crate. The CLI will talk to a Ledger device connected by USB. The commands are communicated
+using an environment variable, `LEDGER_COMMAND`. Another env var lets you switch to testnet (for
+instance to install the test app), simply set `LEDGER_TESTNET` to any value.
 
 For now those commands are implemented:
 - `getinfo`: get information (such as the list of installed apps) for your device
 - `genuinecheck`: check your Ledger device is genuine
 - `installapp`: install the Bitcoin app on your device
+- `updateapp`: update the Bitcoin app on your device
 - `openapp`: open the Bitcoin app on your device
 
 ### Examples
-
-This PoC is now a library. You'll have to use the `ledger_manager_cli` companion binary now to play with it.
-A minimalistic GUI should come soon.
 
 #### Checking your Ledger is genuine
 
@@ -77,18 +98,12 @@ Successfully installed the app.
 
 ## Future
 
-First of all we are now going to investigate pulling bits of this PoC into [Liana](https://github.com/wizardsardine/liana).
+We are looking into people to help test this and confirm it works in as many scenarii as possible.
 
-Also now that the main mechanisms are in place it should be fairly straightforward to implement the
-missing features. What i'd like to see:
-- An `updateapp` command
-- An `upgradefirmware` command
+We are probably going to have to introduce an `upgradefirmware` command.
 
-Also, it would be nice to have a tiny Iced GUI for this project. If someone pulls this off, we could
-polish it a little and start distributing binaries for anyone to benefit, not only Liana users and
-people who can use the command line.
-
-Contributions welcome! If you are interested, hit me up on the [Liana Discord](https://discord.gg/5TEkVxqm).
+Contributions welcome! If you are interested, get in touch on the [Liana
+Discord](https://discord.gg/QJUp67zSN4).
 
 NOTE: i am not interested in supporting altcoins. If you want to add support for one, feel free to
 fork the project.
