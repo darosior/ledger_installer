@@ -26,11 +26,13 @@ async fn main() {
     let ledger = LedgerService::new(ledger_sender, ledger_receiver, gui_ledger_sender);
     ledger.start();
 
+    const ICONEX_ICONS_BYTES: &[u8] = include_bytes!("iconex-icons.ttf");
+
     const ICON: &[u8] = include_bytes!("./sardine.png");
     let icon = icon::from_file_data(ICON, None).unwrap();
 
     let mut settings = Settings::with_flags(flags);
-    settings.window.size = Size::new(500.0, 200.0);
+    settings.window.size = Size::new(500.0, 450.0);
     settings.window.resizable = false;
     settings.window.icon = Some(icon);
 
