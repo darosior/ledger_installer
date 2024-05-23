@@ -26,8 +26,6 @@ async fn main() {
     let ledger = LedgerService::new(ledger_sender, ledger_receiver, gui_ledger_sender);
     ledger.start();
 
-    const ICONEX_ICONS_BYTES: &[u8] = include_bytes!("iconex-icons.ttf");
-
     const ICON: &[u8] = include_bytes!("./sardine.png");
     let icon = icon::from_file_data(ICON, None).unwrap();
 

@@ -18,16 +18,6 @@ pub const GREY_6: Color = Color::from_rgb(
     0x20 as f32 / 255.0,
     0x20 as f32 / 255.0,
 );
-pub const GREY_5: Color = Color::from_rgb(
-    0x27 as f32 / 255.0,
-    0x27 as f32 / 255.0,
-    0x27 as f32 / 255.0,
-);
-pub const GREY_4: Color = Color::from_rgb(
-    0x42 as f32 / 255.0,
-    0x42 as f32 / 255.0,
-    0x42 as f32 / 255.0,
-);
 pub const GREY_3: Color = Color::from_rgb(
     0x71 as f32 / 255.0,
     0x71 as f32 / 255.0,
@@ -50,11 +40,3 @@ pub const GREEN: Color = Color::from_rgb(
     0xFF as f32 / 255.0,
     0x66 as f32 / 255.0,
 );
-pub const RED: Color = Color::from_rgb(
-    0xE2 as f32 / 255.0,
-    0x4E as f32 / 255.0,
-    0x1B as f32 / 255.0,
-);
-
-pub const ORANGE: Color =
-    Color::from_rgb(0xFF as f32 / 255.0, 0xa7 as f32 / 255.0, 0x0 as f32 / 255.0);
