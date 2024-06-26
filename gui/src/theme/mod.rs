@@ -55,6 +55,7 @@ impl text::StyleSheet for Theme {
 #[derive(Debug, Copy, Clone, Default)]
 pub enum Container {
     #[default]
+    Transparent,
     Frame,
 }
 
@@ -63,6 +64,10 @@ impl container::StyleSheet for Theme {
     fn appearance(&self, style: &Self::Style) -> iced::widget::container::Appearance {
         match self {
             Theme::Dark => match style {
+                Container::Transparent => container::Appearance {
+                    background: Some(iced::Color::TRANSPARENT.into()),
+                    ..container::Appearance::default()
+                },
                 Container::Frame => container::Appearance {
                     border: iced::Border {
                         color: color::WHITE,
