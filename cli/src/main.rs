@@ -25,6 +25,7 @@ enum Command {
     UpdateTestApp,
     OpenTestApp,
     UpdateFirmware,
+    CloseApp,
 }
 
 impl Command {
@@ -57,6 +58,8 @@ impl Command {
             })
         } else if cmd_str == "updatefirm" {
             Some(Self::UpdateFirmware)
+        } else if cmd_str == "closeapp" {
+            Some(Self::CloseApp)
         } else {
             None
         }
@@ -136,6 +139,12 @@ fn open_app(ledger_api: &TransportNativeHID, is_testnet: bool) {
     }
 }
 
+fn close_app(ledger_api: &TransportNativeHID) {
+    if let Err(e) = ledger_manager::close_app(ledger_api) {
+        error!("Error closing app: {}", e);
+    }
+}
+
 fn main() {
     let command = if let Some(cmd) = Command::get() {
         cmd
@@ -162,6 +171,9 @@ fn main() {
         }
         Command::OpenTestApp => {
             open_app(&ledger_api, true);
+        }
+        Command::CloseApp => {
+            close_app(&ledger_api);
         }
         Command::UpdateMainApp => {
             update_app(&ledger_api, false);
