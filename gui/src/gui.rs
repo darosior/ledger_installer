@@ -1,5 +1,5 @@
 use crate::{
-    ledger_service::{LedgerListener, LedgerMessage, Version},
+    ledger_service::{LedgerListener, LedgerMessage},
     theme::{self, Theme},
 };
 use async_channel::{Receiver, Sender};
@@ -9,6 +9,7 @@ use iced::{
     Alignment, Application, Element, Font, Length, Renderer,
 };
 use iced_runtime::{futures::Subscription, Command};
+use ledger_manager::utils::Version;
 
 const ICONEX_ICONS_BYTES: &[u8] = include_bytes!("iconex-icons.ttf");
 
