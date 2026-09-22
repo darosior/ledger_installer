@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main, feature/wasm-support]
+  pull_request:
+    branches: [master, main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS_WASM: "--cfg=web_sys_unstable_apis"
+
+jobs:
+  # ===========================================
+  # Code Quality Checks (fast, run first)
+  # ===========================================
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy-desktop:
+    name: Clippy (Desktop)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: clippy-desktop
+      - name: Install dependencies (Linux)
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+      - name: Clippy
+        run: cargo clippy --workspace --exclude ledger_manager_web --all-targets
+
+  clippy-wasm:
+    name: Clippy (WASM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: clippy-wasm
+      - name: Clippy (web crate)
+        run: RUSTFLAGS="${{ env.RUSTFLAGS_WASM }}" cargo clippy -p ledger_manager_web --target wasm32-unknown-unknown
+      - name: Clippy (ledger_manager web features)
+        run: RUSTFLAGS="${{ env.RUSTFLAGS_WASM }}" cargo clippy -p ledger_manager --no-default-features --features web --target wasm32-unknown-unknown
+
+  # ===========================================
+  # Build & Test (matrix for cross-platform)
+  # ===========================================
+  build-desktop:
+    name: Build Desktop (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: build-${{ matrix.os }}
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+
+      - name: Build workspace
+        run: cargo build --workspace --exclude ledger_manager_web --release
+
+      - name: Run tests
+        run: cargo test --workspace --exclude ledger_manager_web
+
+  build-wasm:
+    name: Build WASM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: build-wasm
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build WASM package
+        run: |
+          cd web
+          RUSTFLAGS="${{ env.RUSTFLAGS_WASM }}" wasm-pack build --target web --release
+
+      - name: Upload WASM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-pkg
+          path: web/pkg/
+          retention-days: 7

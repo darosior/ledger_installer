@@ -23,12 +23,12 @@ pub fn set_logger(verbose: bool) {
             } else {
                 format!("[{}] {}", record.level(), message)
             };
-            out.finish(format_args!("{}", formatted.color(color)))
+            out.finish(format_args!("{}", formatted.color(color)));
         })
         .level(log::LevelFilter::Info)
         .level_for("bacca", log::LevelFilter::Debug)
         .level_for("ledger_transport_hidapi", log::LevelFilter::Error)
         .chain(std::io::stdout())
         .apply()
-        .unwrap();
+        .expect("Failed to initialize logger");
 }

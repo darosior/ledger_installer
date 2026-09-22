@@ -4,9 +4,14 @@ use std::error::Error;
 
 use form_urlencoded::Serializer as UrlSerializer;
 use ledger_manager::{
-    bitcoin_latest_app, genuine_check, get_latest_apps,
+    bitcoin_latest_app,
+    firmware::{
+        get_latest_firmware_for_device, repair_device_in_bootloader, update_firmware,
+        FirmwareUpdateContext, FirmwareUpdatePhase,
+    },
+    genuine_check, get_latest_apps,
     ledger_transport_hidapi::{hidapi::HidApi, TransportNativeHID},
-    list_installed_apps, query_via_websocket, DeviceInfo, BASE_SOCKET_URL,
+    list_installed_apps, open_bitcoin_app, query_via_websocket, DeviceInfo, BASE_SOCKET_URL,
 };
 use std::fmt::{Display, Formatter};
 use std::time::Duration;
@@ -46,10 +51,7 @@ where
         }
         Err(e) => {
             log::debug!("Error listing installed applications: {}.", e);
-            msg_callback(
-                &format!("Error listing installed applications: {}.", e),
-                true,
-            );
+            msg_callback(&format!("Error listing installed applications: {e}."), true);
             return Err(e);
         }
     }
@@ -100,7 +102,7 @@ where
             }
             Err(e) => {
                 msg_callback(
-                    &format!("Error querying info about Bitcoin app: {}.", e),
+                    &format!("Error querying info about Bitcoin app: {e}."),
                     true,
                 );
                 return;
@@ -112,7 +114,7 @@ where
         );
         // Now install the app by connecting through their websocket thing to their HSM. Make sure to
         // properly escape the parameters in the request's parameter.
-        let install_ws_url = UrlSerializer::new(format!("{}/install?", BASE_SOCKET_URL))
+        let install_ws_url = UrlSerializer::new(format!("{BASE_SOCKET_URL}/install?"))
             .append_pair("targetId", &device_info.target_id.to_string())
             .append_pair("perso", &bitcoin_app.perso)
             .append_pair("deleteKey", &bitcoin_app.delete_key)
@@ -123,10 +125,7 @@ where
         msg_callback("Install app...", false);
         if let Err(e) = query_via_websocket(transport, &install_ws_url) {
             msg_callback(
-                &format!(
-                    "Got an error when installing Bitcoin app from Ledger's remote HSM: {}.",
-                    e
-                ),
+                &format!("Got an error when installing Bitcoin app from Ledger's remote HSM: {e}."),
                 false,
             );
             return;
@@ -138,13 +137,13 @@ where
 }
 
 fn ledger_api() -> Result<HidApi, String> {
-    HidApi::new().map_err(|e| format!("Error initializing HDI api: {}.", e))
+    HidApi::new().map_err(|e| format!("Error initializing HDI api: {e}."))
 }
 
 fn device_info(ledger_api: &TransportNativeHID) -> Result<DeviceInfo, String> {
     log::info!("ledger::device_info()");
     DeviceInfo::new(ledger_api)
-        .map_err(|e| format!("Error fetching device info: {}. Is the Ledger unlocked?", e))
+        .map_err(|e| format!("Error fetching device info: {e}. Is the Ledger unlocked?"))
 }
 
 struct VersionInfo {
@@ -242,10 +241,10 @@ impl Display for Version {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Version::Installed(version) => {
-                write!(f, "{}", version)
+                write!(f, "{version}")
             }
             Version::Latest(version) => {
-                write!(f, "{}", version)
+                write!(f, "{version}")
             }
             Version::NotInstalled => {
                 write!(f, "Not installed!")
@@ -294,7 +293,7 @@ impl Model {
     /// Determine device model based on BitcoinAppInfo.firmware value
     fn from_app_firmware(value: &str) -> Self {
         let chunks: Vec<&str> = value.split('/').collect();
-        let model = chunks.first().map(|m| m.to_string());
+        let model = chunks.first().map(|m| (*m).to_string());
         if let Some(model) = model {
             if model == "nanos" {
                 Model::NanoS
@@ -318,8 +317,12 @@ pub enum LedgerMessage {
     InstallMain,
     UpdateTest,
     InstallTest,
+    OpenMain,
+    OpenTest,
     TryConnect,
     GenuineCheck,
+    CheckFirmwareUpdate,
+    UpdateFirmware,
 
     Connected(Option<String>, Option<String>),
     MainAppVersion(Version),
@@ -327,6 +330,18 @@ pub enum LedgerMessage {
     DisplayMessage(String, bool),
     DeviceIsGenuine(Option<bool>),
     LatestApps(Version, Version),
+    FirmwareUpdateAvailable(Option<FirmwareInfo>),
+    FirmwareUpdateProgress(FirmwareUpdatePhase),
+}
+
+/// Information about available firmware update
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct FirmwareInfo {
+    pub current_version: String,
+    pub target_version: String,
+    pub osu_name: String,
+    pub should_flash_mcu: bool,
 }
 
 pub struct LedgerService {
@@ -338,6 +353,7 @@ pub struct LedgerService {
     testnet_version: Version,
     last_mainnet: Version,
     last_testnet: Version,
+    firmware_update_context: Option<FirmwareUpdateContext>,
 }
 
 impl LedgerService {
@@ -346,18 +362,18 @@ impl LedgerService {
             self.run().await;
         });
     }
-    /// Send a LedgerMessage to the GUI via async-channel
+    /// Send a `LedgerMessage` to the GUI via async-channel
     fn send_to_gui(&self, msg: LedgerMessage) {
         let sender = self.sender.clone();
         log::info!("LedgerService::send_to_gui({:?})", &msg);
         tokio::spawn(async move {
             if sender.send(msg).await.is_err() {
-                log::debug!("LedgerService.send_to_gui() -> Fail to send Message")
+                log::debug!("LedgerService.send_to_gui() -> Fail to send Message");
             };
         });
     }
 
-    /// Handle a LedgerMessage received from the GUI via async-channel
+    /// Handle a `LedgerMessage` received from the GUI via async-channel
     fn handle_message(&mut self, msg: LedgerMessage) {
         match &msg {
             LedgerMessage::TryConnect => {
@@ -370,20 +386,24 @@ impl LedgerService {
             LedgerMessage::InstallMain => self.install_main(),
             LedgerMessage::UpdateTest => self.update_test(),
             LedgerMessage::InstallTest => self.install_test(),
+            LedgerMessage::OpenMain => self.open_app(false),
+            LedgerMessage::OpenTest => self.open_app(true),
             LedgerMessage::GenuineCheck => self.genuine_check(),
+            LedgerMessage::CheckFirmwareUpdate => self.check_firmware_update(),
+            LedgerMessage::UpdateFirmware => self.perform_firmware_update(),
             _ => {
-                log::debug!("LedgerService.handle_message({:?}) -> unhandled!", msg)
+                log::debug!("LedgerService.handle_message({:?}) -> unhandled!", msg);
             }
         }
     }
 
-    /// Delayed self sent message in order to call poll() later
+    /// Delayed self sent message in order to call `poll()` later
     fn poll_later(&self) {
         let loopback = self.loopback.clone();
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_secs(2)).await;
             if loopback.send(LedgerMessage::TryConnect).await.is_err() {
-                log::debug!("Fail to send Message")
+                log::debug!("Fail to send Message");
             };
         });
     }
@@ -398,17 +418,17 @@ impl LedgerService {
                 if self.last_mainnet.is_none() || self.last_testnet.is_none() {
                     log::info!("Query Ledger catalog...");
                     if let Ok((bitcoin, test)) = check_latest_apps(&transport, |msg, alarm| {
-                        Self::display_message(&sender, msg, alarm)
+                        Self::display_message(&sender, msg, alarm);
                     }) {
                         self.last_mainnet = bitcoin.clone();
                         self.last_testnet = test.clone();
-                        self.send_to_gui(LedgerMessage::LatestApps(bitcoin, test))
+                        self.send_to_gui(LedgerMessage::LatestApps(bitcoin, test));
                     } else {
                         Self::display_message(
                             &sender,
                             "Fail to get latest apps from Ledger API!",
                             true,
-                        )
+                        );
                     }
                 }
 
@@ -441,7 +461,7 @@ impl LedgerService {
                         self.update_apps_version();
                     }
                     // clear message if not app detected
-                    Self::display_message(&sender, "", false)
+                    Self::display_message(&sender, "", false);
                 }
             } else {
                 // Inform GUI that ledger disconnected
@@ -475,7 +495,7 @@ impl LedgerService {
         self.send_to_gui(LedgerMessage::LatestApps(
             self.last_mainnet.clone(),
             self.last_testnet.clone(),
-        ))
+        ));
     }
 
     fn install(&mut self, testnet: bool) {
@@ -498,7 +518,7 @@ impl LedgerService {
                 &transport,
                 |msg, alarm| Self::display_message(&sender, msg, alarm),
                 testnet,
-            )
+            );
         }
     }
 
@@ -518,6 +538,34 @@ impl LedgerService {
         self.install(true);
     }
 
+    fn open_app(&mut self, testnet: bool) {
+        log::info!("LedgerService::open_app(testnet={})", testnet);
+        let app_name = if testnet { "Bitcoin Test" } else { "Bitcoin" };
+        if let Some(transport) = self.connect() {
+            self.send_to_gui(LedgerMessage::DisplayMessage(
+                format!("Opening {app_name} app..."),
+                false,
+            ));
+            if let Err(e) = open_bitcoin_app(&transport, testnet) {
+                self.send_to_gui(LedgerMessage::DisplayMessage(
+                    format!("Error opening {app_name} app: {e}"),
+                    true,
+                ));
+            } else {
+                self.send_to_gui(LedgerMessage::DisplayMessage(
+                    format!("{app_name} app opened successfully."),
+                    false,
+                ));
+            }
+        } else {
+            log::info!("Cannot connect to device!");
+            self.send_to_gui(LedgerMessage::DisplayMessage(
+                "Cannot connect to device!".to_string(),
+                true,
+            ));
+        }
+    }
+
     fn genuine_check(&mut self) {
         log::info!("LedgerService::genuine_check()");
         if let Some(transport) = self.connect() {
@@ -530,7 +578,7 @@ impl LedgerService {
                 self.send_to_gui(LedgerMessage::DisplayMessage(e.to_string(), true));
                 self.send_to_gui(LedgerMessage::DeviceIsGenuine(None));
             } else {
-                self.send_to_gui(LedgerMessage::DisplayMessage("".to_string(), false));
+                self.send_to_gui(LedgerMessage::DisplayMessage(String::new(), false));
                 self.send_to_gui(LedgerMessage::DeviceIsGenuine(Some(true)));
             }
         } else {
@@ -544,12 +592,230 @@ impl LedgerService {
         log::info!("LedgerService::genuine_check() ended!");
     }
 
+    fn check_firmware_update(&mut self) {
+        log::info!("LedgerService::check_firmware_update()");
+        if let Some(transport) = self.connect() {
+            self.send_to_gui(LedgerMessage::DisplayMessage(
+                "Checking for firmware updates...".to_string(),
+                false,
+            ));
+
+            let device_info = match DeviceInfo::new(&transport) {
+                Ok(info) => info,
+                Err(e) => {
+                    log::error!("Failed to get device info: {}", e);
+                    self.send_to_gui(LedgerMessage::DisplayMessage(
+                        format!("Failed to get device info: {e}"),
+                        true,
+                    ));
+                    self.send_to_gui(LedgerMessage::FirmwareUpdateAvailable(None));
+                    return;
+                }
+            };
+
+            // Handle bootloader mode
+            if device_info.is_bootloader {
+                log::info!("Device is in bootloader mode - repair needed");
+                self.send_to_gui(LedgerMessage::DisplayMessage(
+                    "Device in bootloader mode - repair available".to_string(),
+                    false,
+                ));
+                self.firmware_update_context = None;
+                self.send_to_gui(LedgerMessage::FirmwareUpdateAvailable(Some(FirmwareInfo {
+                    current_version: "Bootloader".to_string(),
+                    target_version: "Repair".to_string(),
+                    osu_name: "Repair Mode".to_string(),
+                    should_flash_mcu: true,
+                })));
+                return;
+            }
+
+            match get_latest_firmware_for_device(&device_info) {
+                Ok(Some(ctx)) => {
+                    log::info!(
+                        "Firmware update available: {} -> {}",
+                        device_info.version,
+                        ctx.final_firmware.version
+                    );
+                    let info = FirmwareInfo {
+                        current_version: device_info.version.clone(),
+                        target_version: ctx.final_firmware.version.clone(),
+                        osu_name: ctx.osu.name.clone(),
+                        should_flash_mcu: ctx.should_flash_mcu,
+                    };
+                    self.firmware_update_context = Some(ctx);
+                    self.send_to_gui(LedgerMessage::DisplayMessage(
+                        format!(
+                            "Update available: {} -> {}",
+                            info.current_version, info.target_version
+                        ),
+                        false,
+                    ));
+                    self.send_to_gui(LedgerMessage::FirmwareUpdateAvailable(Some(info)));
+                }
+                Ok(None) => {
+                    log::info!("Firmware is up to date: {}", device_info.version);
+                    self.firmware_update_context = None;
+                    self.send_to_gui(LedgerMessage::DisplayMessage(
+                        format!("Firmware is up to date ({})", device_info.version),
+                        false,
+                    ));
+                    self.send_to_gui(LedgerMessage::FirmwareUpdateAvailable(None));
+                }
+                Err(e) => {
+                    log::error!("Error checking for firmware updates: {}", e);
+                    self.send_to_gui(LedgerMessage::DisplayMessage(
+                        format!("Error checking for updates: {e}"),
+                        true,
+                    ));
+                    self.send_to_gui(LedgerMessage::FirmwareUpdateAvailable(None));
+                }
+            }
+        } else {
+            log::info!("Cannot connect to device for firmware check!");
+            self.send_to_gui(LedgerMessage::DisplayMessage(
+                "Cannot connect to device!".to_string(),
+                true,
+            ));
+            self.send_to_gui(LedgerMessage::FirmwareUpdateAvailable(None));
+        }
+        log::info!("LedgerService::check_firmware_update() ended!");
+    }
+
+    fn perform_firmware_update(&mut self) {
+        log::info!("LedgerService::perform_firmware_update()");
+        let sender = self.sender.clone();
+
+        if let Some(transport) = self.connect() {
+            // Check if device is in bootloader mode (repair needed)
+            let device_info = match DeviceInfo::new(&transport) {
+                Ok(info) => info,
+                Err(e) => {
+                    log::error!("Failed to get device info: {}", e);
+                    self.send_to_gui(LedgerMessage::DisplayMessage(
+                        format!("Failed to get device info: {e}"),
+                        true,
+                    ));
+                    return;
+                }
+            };
+
+            if device_info.is_bootloader {
+                // Repair mode
+                self.send_to_gui(LedgerMessage::DisplayMessage(
+                    "Repairing device in bootloader mode...".to_string(),
+                    false,
+                ));
+                self.send_to_gui(LedgerMessage::FirmwareUpdateProgress(
+                    FirmwareUpdatePhase::WaitingForBootloader,
+                ));
+
+                match repair_device_in_bootloader(&transport, |phase| {
+                    Self::send_progress(&sender, phase);
+                }) {
+                    Ok(()) => {
+                        log::info!("Device repaired successfully!");
+                        self.send_to_gui(LedgerMessage::FirmwareUpdateProgress(
+                            FirmwareUpdatePhase::Completed,
+                        ));
+                        self.send_to_gui(LedgerMessage::DisplayMessage(
+                            "Device repaired successfully!".to_string(),
+                            false,
+                        ));
+                        // Reset state
+                        self.device_version = None;
+                        self.firmware_update_context = None;
+                        self.poll();
+                    }
+                    Err(e) => {
+                        log::error!("Repair failed: {}", e);
+                        self.send_to_gui(LedgerMessage::FirmwareUpdateProgress(
+                            FirmwareUpdatePhase::Failed {
+                                error: e.to_string(),
+                            },
+                        ));
+                        self.send_to_gui(LedgerMessage::DisplayMessage(
+                            format!("Repair failed: {e}"),
+                            true,
+                        ));
+                    }
+                }
+                return;
+            }
+
+            // Normal firmware update
+            if let Some(ctx) = &self.firmware_update_context {
+                self.send_to_gui(LedgerMessage::DisplayMessage(
+                    format!(
+                        "Updating firmware to {}. DO NOT disconnect!",
+                        ctx.final_firmware.version
+                    ),
+                    false,
+                ));
+
+                match update_firmware(&transport, ctx, |phase| {
+                    Self::send_progress(&sender, phase);
+                }) {
+                    Ok(()) => {
+                        log::info!("Firmware updated successfully!");
+                        self.send_to_gui(LedgerMessage::FirmwareUpdateProgress(
+                            FirmwareUpdatePhase::Completed,
+                        ));
+                        self.send_to_gui(LedgerMessage::DisplayMessage(
+                            "Firmware updated successfully!".to_string(),
+                            false,
+                        ));
+                        // Reset state
+                        self.device_version = None;
+                        self.firmware_update_context = None;
+                        self.poll();
+                    }
+                    Err(e) => {
+                        log::error!("Firmware update failed: {}", e);
+                        self.send_to_gui(LedgerMessage::FirmwareUpdateProgress(
+                            FirmwareUpdatePhase::Failed {
+                                error: e.to_string(),
+                            },
+                        ));
+                        self.send_to_gui(LedgerMessage::DisplayMessage(
+                            format!("Update failed: {e}"),
+                            true,
+                        ));
+                    }
+                }
+            } else {
+                log::warn!("No firmware update context available!");
+                self.send_to_gui(LedgerMessage::DisplayMessage(
+                    "No update available. Check for updates first.".to_string(),
+                    true,
+                ));
+            }
+        } else {
+            log::info!("Cannot connect to device for firmware update!");
+            self.send_to_gui(LedgerMessage::DisplayMessage(
+                "Cannot connect to device!".to_string(),
+                true,
+            ));
+        }
+        log::info!("LedgerService::perform_firmware_update() ended!");
+    }
+
+    fn send_progress(sender: &Sender<LedgerMessage>, phase: FirmwareUpdatePhase) {
+        let sender = sender.clone();
+        let msg = LedgerMessage::FirmwareUpdateProgress(phase);
+        tokio::spawn(async move {
+            if sender.send(msg).await.is_err() {
+                log::debug!("LedgerService.send_progress() -> Fail to send Message");
+            };
+        });
+    }
+
     fn display_message(sender: &Sender<LedgerMessage>, msg: &str, alarm: bool) {
         let sender = sender.clone();
         let msg = LedgerMessage::DisplayMessage(msg.to_string(), alarm);
         tokio::spawn(async move {
             if sender.send(msg).await.is_err() {
-                log::debug!("LedgerService.send_to_gui() -> Fail to send Message")
+                log::debug!("LedgerService.send_to_gui() -> Fail to send Message");
             };
         });
     }
@@ -570,6 +836,7 @@ impl ServiceFn<LedgerMessage, Sender<LedgerMessage>> for LedgerService {
             testnet_version: Version::None,
             last_mainnet: Version::None,
             last_testnet: Version::None,
+            firmware_update_context: None,
         }
     }
 

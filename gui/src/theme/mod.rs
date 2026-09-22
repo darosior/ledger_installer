@@ -80,6 +80,7 @@ impl container::StyleSheet for Theme {
 pub enum Button {
     #[default]
     Primary,
+    Prominent,
 }
 
 impl button::StyleSheet for Theme {
@@ -99,6 +100,17 @@ impl button::StyleSheet for Theme {
                     },
                     ..button::Appearance::default()
                 },
+                Button::Prominent => button::Appearance {
+                    shadow_offset: iced::Vector::default(),
+                    background: Some(color::GREEN.into()),
+                    text_color: color::LIGHT_BLACK,
+                    border: iced::Border {
+                        color: color::GREEN,
+                        width: 2.0,
+                        radius: 25.0.into(),
+                    },
+                    ..button::Appearance::default()
+                },
             },
         }
     }
@@ -113,6 +125,17 @@ impl button::StyleSheet for Theme {
                     border: iced::Border {
                         color: color::TRANSPARENT,
                         width: 0.0,
+                        radius: 25.0.into(),
+                    },
+                    ..button::Appearance::default()
+                },
+                Button::Prominent => button::Appearance {
+                    shadow_offset: iced::Vector::default(),
+                    background: Some(color::WHITE.into()),
+                    text_color: color::LIGHT_BLACK,
+                    border: iced::Border {
+                        color: color::WHITE,
+                        width: 2.0,
                         radius: 25.0.into(),
                     },
                     ..button::Appearance::default()

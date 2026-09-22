@@ -20,3 +20,6 @@ fern = "0.6.2"
 chrono = "0.4.33"
 colored = "2.1.0"
 form_urlencoded = "1.2.1"
+
+[lints]
+workspace = true

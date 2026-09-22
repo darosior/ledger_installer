@@ -9,3 +9,8 @@ readme.workspace = true
 
 [dependencies]
 ledger_manager = { path = "../ledger_manager" }
+dialoguer = "0.11"
+console = "0.15"
+
+[lints]
+workspace = true

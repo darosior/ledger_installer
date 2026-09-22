@@ -1,0 +1,175 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [master, main, feature/interactive-menu, feature/wasm-support]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout all branches
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Create dist directory
+        run: mkdir -p dist
+
+      - name: Build and deploy master branch
+        run: |
+          git checkout master || git checkout main || true
+          if [ -d "web" ]; then
+            cd web
+            wasm-pack build --target web --release || true
+            cd ..
+            mkdir -p dist/master
+            cp web/index.html dist/master/ 2>/dev/null || true
+            cp web/style.css dist/master/ 2>/dev/null || true
+            cp web/app.js dist/master/ 2>/dev/null || true
+            cp -r web/pkg dist/master/ 2>/dev/null || true
+          fi
+
+      - name: Build and deploy feature/interactive-menu branch
+        run: |
+          git checkout feature/interactive-menu || true
+          if [ -d "web" ]; then
+            cd web
+            wasm-pack build --target web --release || true
+            cd ..
+            mkdir -p dist/interactive-menu
+            cp web/index.html dist/interactive-menu/ 2>/dev/null || true
+            cp web/style.css dist/interactive-menu/ 2>/dev/null || true
+            cp web/app.js dist/interactive-menu/ 2>/dev/null || true
+            cp -r web/pkg dist/interactive-menu/ 2>/dev/null || true
+          fi
+
+      - name: Build and deploy feature/wasm-support branch
+        run: |
+          git checkout feature/wasm-support
+          cd web
+          wasm-pack build --target web --release
+          cd ..
+          mkdir -p dist/wasm-support
+          cp web/index.html dist/wasm-support/
+          cp web/style.css dist/wasm-support/
+          cp web/app.js dist/wasm-support/
+          cp -r web/pkg dist/wasm-support/
+          # Also make wasm-support the default (root) deployment
+          cp web/index.html dist/
+          cp web/style.css dist/
+          cp web/app.js dist/
+          cp -r web/pkg dist/
+
+      - name: Create index page
+        run: |
+          cat > dist/index.html << 'HTMLEOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Bacca - Branch Deployments</title>
+              <style>
+                  body {
+                      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                      background: #0f0f0f;
+                      color: #fff;
+                      min-height: 100vh;
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+                  }
+                  .container {
+                      text-align: center;
+                      max-width: 500px;
+                      padding: 2rem;
+                  }
+                  h1 {
+                      color: #f7931a;
+                      font-size: 2.5rem;
+                      margin-bottom: 0.5rem;
+                  }
+                  .subtitle {
+                      color: #888;
+                      margin-bottom: 2rem;
+                  }
+                  .branches {
+                      display: flex;
+                      flex-direction: column;
+                      gap: 1rem;
+                  }
+                  a {
+                      display: block;
+                      padding: 1rem 2rem;
+                      background: #222;
+                      color: #fff;
+                      text-decoration: none;
+                      border-radius: 8px;
+                      border: 1px solid #333;
+                      transition: all 0.2s;
+                  }
+                  a:hover {
+                      background: #333;
+                      border-color: #f7931a;
+                  }
+                  .badge {
+                      font-size: 0.75rem;
+                      background: #f7931a;
+                      color: #000;
+                      padding: 0.2rem 0.5rem;
+                      border-radius: 4px;
+                      margin-left: 0.5rem;
+                  }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <h1>Bacca</h1>
+                  <p class="subtitle">Ledger Bitcoin App Manager - Branch Deployments</p>
+                  <div class="branches">
+                      <a href="./wasm-support/">feature/wasm-support <span class="badge">latest</span></a>
+                      <a href="./interactive-menu/">feature/interactive-menu</a>
+                      <a href="./master/">master</a>
+                  </div>
+              </div>
+          </body>
+          </html>
+          HTMLEOF
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

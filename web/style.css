@@ -1,0 +1,326 @@
+/* Bacca Web UI - Simple, clean styling */
+
+:root {
+    --bg-primary: #0f0f0f;
+    --bg-secondary: #1a1a1a;
+    --bg-card: #222222;
+    --text-primary: #ffffff;
+    --text-secondary: #a0a0a0;
+    --accent: #f7931a; /* Bitcoin orange */
+    --accent-hover: #ffaa33;
+    --success: #22c55e;
+    --warning: #eab308;
+    --error: #ef4444;
+    --border: #333333;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    line-height: 1.6;
+    min-height: 100vh;
+}
+
+.container {
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 2rem 1rem;
+}
+
+/* Header */
+header {
+    text-align: center;
+    margin-bottom: 2rem;
+}
+
+header h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 0.25rem;
+}
+
+.subtitle {
+    color: var(--text-secondary);
+    font-size: 1rem;
+}
+
+/* Cards */
+.card {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-bottom: 1rem;
+}
+
+.card h2 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    color: var(--text-primary);
+}
+
+.card .description {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    margin-bottom: 1rem;
+}
+
+.card .placeholder {
+    color: var(--text-secondary);
+    font-style: italic;
+    font-size: 0.9rem;
+}
+
+/* Buttons */
+.btn {
+    display: inline-block;
+    padding: 0.75rem 1.5rem;
+    font-size: 0.9rem;
+    font-weight: 500;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn.primary {
+    background-color: var(--accent);
+    color: var(--bg-primary);
+}
+
+.btn.primary:hover:not(:disabled) {
+    background-color: var(--accent-hover);
+}
+
+.btn.secondary {
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+}
+
+.btn.secondary:hover:not(:disabled) {
+    background-color: var(--border);
+}
+
+.btn.small {
+    padding: 0.5rem 1rem;
+    font-size: 0.8rem;
+}
+
+.button-group {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+/* Status indicator */
+.status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+}
+
+.status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: var(--text-secondary);
+}
+
+.status.connected .status-dot {
+    background-color: var(--success);
+}
+
+.status.disconnected .status-dot {
+    background-color: var(--error);
+}
+
+/* Warning box */
+.warning {
+    background-color: rgba(234, 179, 8, 0.1);
+    border: 1px solid var(--warning);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    color: var(--warning);
+}
+
+.warning strong {
+    display: block;
+    margin-bottom: 0.5rem;
+}
+
+.hidden {
+    display: none;
+}
+
+/* Log */
+.log {
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1rem;
+    max-height: 200px;
+    overflow-y: auto;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 0.8rem;
+    margin-bottom: 1rem;
+}
+
+.log-entry {
+    margin-bottom: 0.25rem;
+    padding: 0.25rem 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.log-entry:last-child {
+    border-bottom: none;
+}
+
+.log-entry .time {
+    color: var(--text-secondary);
+    margin-right: 0.5rem;
+}
+
+.log-entry.success {
+    color: var(--success);
+}
+
+.log-entry.error {
+    color: var(--error);
+}
+
+.log-entry.info {
+    color: var(--text-primary);
+}
+
+/* Device info display */
+#device-info dl {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.5rem 1rem;
+}
+
+#device-info dt {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+#device-info dd {
+    font-weight: 500;
+}
+
+/* App status */
+.app-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+}
+
+.app-status.installed {
+    color: var(--success);
+}
+
+.app-status.not-installed {
+    color: var(--text-secondary);
+}
+
+/* Result messages */
+.result {
+    padding: 0.75rem;
+    border-radius: 4px;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+}
+
+.result.success {
+    background-color: rgba(34, 197, 94, 0.1);
+    border: 1px solid var(--success);
+    color: var(--success);
+}
+
+.result.error {
+    background-color: rgba(239, 68, 68, 0.1);
+    border: 1px solid var(--error);
+    color: var(--error);
+}
+
+.result.pending {
+    background-color: rgba(247, 147, 26, 0.1);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+}
+
+/* Footer */
+footer {
+    text-align: center;
+    margin-top: 2rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+footer a {
+    color: var(--accent);
+    text-decoration: none;
+}
+
+footer a:hover {
+    text-decoration: underline;
+}
+
+/* Loading spinner */
+.loading {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-right: 0.5rem;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+    .container {
+        padding: 1rem;
+    }
+
+    header h1 {
+        font-size: 2rem;
+    }
+
+    .button-group {
+        flex-direction: column;
+    }
+
+    .btn {
+        width: 100%;
+        text-align: center;
+    }
+}

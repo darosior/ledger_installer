@@ -1,5 +1,5 @@
 use crate::{
-    ledger_service::{LedgerListener, LedgerMessage, Version},
+    ledger_service::{FirmwareInfo, LedgerListener, LedgerMessage, Version},
     theme::{self, Theme},
 };
 use async_channel::{Receiver, Sender};
@@ -9,6 +9,7 @@ use iced::{
     Alignment, Application, Element, Font, Length, Renderer,
 };
 use iced_runtime::{futures::Subscription, Command};
+use ledger_manager::firmware::FirmwareUpdatePhase;
 
 const ICONEX_ICONS_BYTES: &[u8] = include_bytes!("iconex-icons.ttf");
 
@@ -24,11 +25,15 @@ pub enum Message {
 
     UpdateMain,
     InstallMain,
+    OpenMain,
     UpdateTest,
     InstallTest,
+    OpenTest,
     #[allow(unused)]
     Connect,
     GenuineCheck,
+    CheckFirmwareUpdate,
+    UpdateFirmware,
 
     ResetAlarm,
     Result,
@@ -54,6 +59,10 @@ pub struct LedgerInstaller {
     device_is_genuine: Option<bool>,
     device_busy: bool,
     alarm: bool,
+    firmware_update_info: Option<FirmwareInfo>,
+    firmware_update_progress: Option<FirmwareUpdatePhase>,
+    firmware_checked: bool,
+    firmware_current_version: Option<String>,
 }
 
 impl LedgerInstaller {
@@ -84,6 +93,10 @@ impl Application for LedgerInstaller {
             device_is_genuine: None,
             device_busy: false,
             alarm: false,
+            firmware_update_info: None,
+            firmware_update_progress: None,
+            firmware_checked: false,
+            firmware_current_version: None,
         };
 
         let cmd = iced::font::load(ICONEX_ICONS_BYTES).map(Message::from);
@@ -105,6 +118,14 @@ impl Application for LedgerInstaller {
                         self.main_latest_version = Version::None;
                         self.test_app_version = Version::None;
                         self.test_latest_version = Version::None;
+                        // Reset firmware state when device disconnects
+                        self.firmware_checked = false;
+                        self.firmware_current_version = None;
+                        self.firmware_update_info = None;
+                        self.firmware_update_progress = None;
+                    } else {
+                        // Capture the current firmware version from device
+                        self.firmware_current_version = version.clone();
                     }
                     self.ledger_model = model;
                     self.ledger_version = version;
@@ -124,7 +145,7 @@ impl Application for LedgerInstaller {
                         alarm
                     );
                     if alarm {
-                        self.device_busy = false
+                        self.device_busy = false;
                     }
                     self.user_message = Some(s);
                     self.alarm = alarm;
@@ -137,11 +158,30 @@ impl Application for LedgerInstaller {
                     self.main_latest_version = bitcoin;
                     self.test_latest_version = test;
                 }
+                LedgerMessage::FirmwareUpdateAvailable(info) => {
+                    self.firmware_checked = true;
+                    if let Some(ref fw_info) = info {
+                        self.firmware_current_version = Some(fw_info.current_version.clone());
+                    }
+                    self.firmware_update_info = info;
+                    self.device_busy = false;
+                }
+                LedgerMessage::FirmwareUpdateProgress(phase) => {
+                    self.firmware_update_progress = Some(phase.clone());
+                    // Mark complete or failed as not busy
+                    if matches!(
+                        phase,
+                        FirmwareUpdatePhase::Completed | FirmwareUpdatePhase::Failed { .. }
+                    ) {
+                        self.device_busy = false;
+                        self.firmware_update_info = None;
+                    }
+                }
                 _ => {
                     log::debug!(
                         "LedgerInstaller.update() => Unhandled message from ledger: {:?}!",
                         ledger
-                    )
+                    );
                 }
             },
             Message::ResetAlarm => {
@@ -156,7 +196,7 @@ impl Application for LedgerInstaller {
                 self.main_app_version = Version::None;
                 self.test_app_version = Version::None;
                 self.device_busy = true;
-                self.send_ledger_msg(LedgerMessage::InstallMain)
+                self.send_ledger_msg(LedgerMessage::InstallMain);
             }
             Message::UpdateTest => {
                 self.send_ledger_msg(LedgerMessage::UpdateTest);
@@ -166,15 +206,34 @@ impl Application for LedgerInstaller {
                 self.main_app_version = Version::None;
                 self.test_app_version = Version::None;
                 self.device_busy = true;
-                self.send_ledger_msg(LedgerMessage::InstallTest)
+                self.send_ledger_msg(LedgerMessage::InstallTest);
+            }
+            Message::OpenMain => {
+                self.device_busy = true;
+                self.send_ledger_msg(LedgerMessage::OpenMain);
+            }
+            Message::OpenTest => {
+                self.device_busy = true;
+                self.send_ledger_msg(LedgerMessage::OpenTest);
             }
             Message::GenuineCheck => {
                 self.device_busy = true;
-                self.send_ledger_msg(LedgerMessage::GenuineCheck)
+                self.send_ledger_msg(LedgerMessage::GenuineCheck);
+            }
+            Message::CheckFirmwareUpdate => {
+                self.device_busy = true;
+                self.firmware_update_info = None;
+                self.firmware_update_progress = None;
+                self.send_ledger_msg(LedgerMessage::CheckFirmwareUpdate);
+            }
+            Message::UpdateFirmware => {
+                self.device_busy = true;
+                self.firmware_update_progress = None;
+                self.send_ledger_msg(LedgerMessage::UpdateFirmware);
             }
             Message::Result => {}
             _ => {
-                log::debug!("LedgerInstaller.update() => Unhandled message {:?}", event)
+                log::debug!("LedgerInstaller.update() => Unhandled message {:?}", event);
             }
         }
         Command::none()
@@ -198,6 +257,44 @@ impl Application for LedgerInstaller {
             self.device_busy,
         );
 
+        let firmware = firmware_container(
+            self.firmware_update_info.clone(),
+            self.firmware_update_progress.clone(),
+            self.device_busy,
+            self.firmware_checked,
+            self.firmware_current_version.clone(),
+        );
+
+        // Create the prominent Update Firmware button
+        // If update is available, clicking performs the update; otherwise it checks for updates
+        let (btn_text, update_firmware_btn_msg) = if self.firmware_update_info.is_some() {
+            (
+                "Update Firmware",
+                if self.device_busy {
+                    None
+                } else {
+                    Some(Message::UpdateFirmware)
+                },
+            )
+        } else {
+            (
+                "Check for Firmware Updates",
+                if self.device_busy {
+                    None
+                } else {
+                    Some(Message::CheckFirmwareUpdate)
+                },
+            )
+        };
+        let update_firmware_button = Button::new(
+            Text::new(btn_text)
+                .size(20)
+                .horizontal_alignment(alignment::Horizontal::Center),
+        )
+        .style(theme::Button::Prominent)
+        .padding([12, 30])
+        .on_press_maybe(update_firmware_btn_msg);
+
         let app = if display_app {
             Some(
                 Column::new()
@@ -217,13 +314,29 @@ impl Application for LedgerInstaller {
                             .push(Space::with_width(Length::Fill)),
                     )
                     .push(Space::with_height(5))
-                    .push(apps),
+                    .push(apps)
+                    .push(Space::with_height(5))
+                    .push(
+                        Row::new()
+                            .push(Space::with_width(Length::Fill))
+                            .push(Text::new("Firmware").size(20))
+                            .push(Space::with_width(Length::Fill)),
+                    )
+                    .push(Space::with_height(5))
+                    .push(firmware)
+                    .push(Space::with_height(15))
+                    .push(
+                        Row::new()
+                            .push(Space::with_width(Length::Fill))
+                            .push(update_firmware_button)
+                            .push(Space::with_width(Length::Fill)),
+                    ),
             )
         } else {
             None
         };
 
-        let reset_alarm: Option<Row<Message, Theme, Renderer>> =
+        let reset_alarm: Option<Row<'_, Message, Theme, Renderer>> =
             if self.alarm && self.ledger_model.is_some() {
                 Some(
                     Row::new()
@@ -258,14 +371,14 @@ impl Application for LedgerInstaller {
                 None
             };
 
-        let user_message = if !self.alarm {
+        let user_message = if self.alarm {
+            None
+        } else {
             self.user_message.clone().map(|msg| {
                 Row::new()
                     .push(Space::with_width(10))
                     .push(Text::new(msg.clone()))
             })
-        } else {
-            None
         };
 
         Container::new(
@@ -304,10 +417,10 @@ fn device_container<'a>(
     let version = version.unwrap_or(" - ".to_string());
 
     // We do not allow user to click the button if service still processing a task w/ device
-    let genuine_msg = if !device_busy {
-        Some(Message::GenuineCheck)
-    } else {
+    let genuine_msg = if device_busy {
         None
+    } else {
+        Some(Message::GenuineCheck)
     };
 
     // allow user to check if device is genuine only once per launch
@@ -377,7 +490,7 @@ fn apps_container<'a>(
     // It looks weird that we load iconex-icons.ttf by its name: Untitled1
     const ICONEX_ICONS: Font = Font::with_name("Untitled1");
 
-    fn raw_btn(txt: &str, msg: Option<Message>) -> Button<Message, Theme> {
+    fn raw_btn(txt: &str, msg: Option<Message>) -> Button<'_, Message, Theme> {
         Button::new(
             Row::new()
                 .push(
@@ -397,16 +510,27 @@ fn apps_container<'a>(
         latest: &Version,
         install_msg: Option<Message>,
         update_msg: Option<Message>,
+        open_msg: Option<Message>,
     ) -> Container<'static, Message, Theme> {
         match (version, latest) {
             (Version::NotInstalled, _) => Container::new(raw_btn(" Install ", install_msg)),
             (Version::Installed(_), Version::Latest(_)) => {
                 // FIXME: Here we only check if installed version differ from `latest` in Ledger catalog(stable), so if
                 //     //  user have an `alpha` version installed we still offer him to `update` to the `stable` version
-                if version != latest {
-                    Container::new(raw_btn(" Update ", update_msg))
+                if version == latest {
+                    Container::new(
+                        Row::new()
+                            .push(Text::new("Latest").size(25))
+                            .push(Space::with_width(15))
+                            .push(raw_btn(" Open ", open_msg)),
+                    )
                 } else {
-                    Container::new(Text::new("Latest").size(25))
+                    Container::new(
+                        Row::new()
+                            .push(raw_btn(" Update ", update_msg))
+                            .push(Space::with_width(10))
+                            .push(raw_btn(" Open ", open_msg)),
+                    )
                 }
             }
             _ => Container::new(Text::new(" - ").size(25)),
@@ -415,32 +539,42 @@ fn apps_container<'a>(
 
     fn version(version: Version) -> String {
         match version {
-            Version::Installed(v) => format!("Version: {}", v),
+            Version::Installed(v) => format!("Version: {v}"),
             Version::NotInstalled => "Not installed".to_string(),
             _ => " - ".to_string(),
         }
     }
 
     // We do not allow user to click buttons if service still processing a task w/ device
-    let install_bitcoin_msg = if !device_busy {
+    let install_bitcoin_msg = if device_busy {
+        None
+    } else {
         Some(Message::InstallMain)
-    } else {
-        None
     };
-    let update_bitcoin_msg = if !device_busy {
+    let update_bitcoin_msg = if device_busy {
+        None
+    } else {
         Some(Message::UpdateMain)
-    } else {
-        None
     };
-    let install_test_msg = if !device_busy {
+    let open_bitcoin_msg = if device_busy {
+        None
+    } else {
+        Some(Message::OpenMain)
+    };
+    let install_test_msg = if device_busy {
+        None
+    } else {
         Some(Message::InstallTest)
-    } else {
-        None
     };
-    let update_test_msg = if !device_busy {
-        Some(Message::UpdateTest)
-    } else {
+    let update_test_msg = if device_busy {
         None
+    } else {
+        Some(Message::UpdateTest)
+    };
+    let open_test_msg = if device_busy {
+        None
+    } else {
+        Some(Message::OpenTest)
     };
 
     let bitcoin_button = btn(
@@ -448,6 +582,7 @@ fn apps_container<'a>(
         &bitcoin_latest,
         install_bitcoin_msg,
         update_bitcoin_msg,
+        open_bitcoin_msg,
     );
 
     let test_button = btn(
@@ -455,6 +590,7 @@ fn apps_container<'a>(
         &test_latest,
         install_test_msg,
         update_test_msg,
+        open_test_msg,
     );
 
     let bitcoin_version = version(bitcoin_version);
@@ -527,4 +663,61 @@ fn apps_container<'a>(
     .style(theme::Container::Frame)
     .padding(10)
     .height(200)
+}
+
+fn firmware_container<'a>(
+    update_info: Option<FirmwareInfo>,
+    progress: Option<FirmwareUpdatePhase>,
+    _device_busy: bool,
+    firmware_checked: bool,
+    current_version: Option<String>,
+) -> Container<'a, Message, Theme, Renderer> {
+    let first_column_offset = 80;
+    let first_column_width = 150;
+
+    // Build progress/status text
+    let status_text = if let Some(phase) = &progress {
+        match phase {
+            FirmwareUpdatePhase::CheckingForUpdates => "Checking for updates...".to_string(),
+            FirmwareUpdatePhase::DownloadingMetadata => "Downloading metadata...".to_string(),
+            FirmwareUpdatePhase::InstallingOsu { progress } => {
+                format!("Installing OSU: {:.1}%", progress * 100.0)
+            }
+            FirmwareUpdatePhase::WaitingForBootloader => "Waiting for bootloader...".to_string(),
+            FirmwareUpdatePhase::FlashingMcu {
+                iteration,
+                progress,
+            } => format!("Flashing MCU ({}/5): {:.1}%", iteration, progress * 100.0),
+            FirmwareUpdatePhase::InstallingFinalFirmware { progress } => {
+                format!("Installing firmware: {:.1}%", progress * 100.0)
+            }
+            FirmwareUpdatePhase::Completed => "Update complete!".to_string(),
+            FirmwareUpdatePhase::Failed { error } => format!("Failed: {error}"),
+        }
+    } else if let Some(info) = &update_info {
+        format!(
+            "Update available: {} -> {}",
+            info.current_version, info.target_version
+        )
+    } else if firmware_checked {
+        // Firmware check was performed but no update available
+        if let Some(version) = current_version {
+            format!("Up to date ({version})")
+        } else {
+            "Up to date".to_string()
+        }
+    } else {
+        "Not checked".to_string()
+    };
+
+    Container::new(
+        Row::new()
+            .push(Space::with_width(first_column_offset))
+            .push(Text::new("Status:").width(first_column_width))
+            .push(Space::with_width(Length::Fill))
+            .push(Text::new(status_text))
+            .push(Space::with_width(Length::Fill)),
+    )
+    .style(theme::Container::Frame)
+    .padding(10)
 }

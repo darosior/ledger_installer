@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bacca - Ledger Bitcoin App Manager</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Bacca</h1>
+            <p class="subtitle">Ledger Bitcoin App Manager</p>
+        </header>
+
+        <main>
+            <!-- WebHID Support Check -->
+            <div id="support-warning" class="warning hidden">
+                <strong>WebHID Not Supported</strong>
+                <p>Your browser does not support WebHID. Please use Chrome, Edge, or Opera.</p>
+            </div>
+
+            <!-- Connection Section -->
+            <section class="card">
+                <h2>Device Connection</h2>
+                <div id="connection-status" class="status disconnected">
+                    <span class="status-dot"></span>
+                    <span>Not Connected</span>
+                </div>
+                <button id="connect-btn" class="btn primary">Connect Ledger</button>
+            </section>
+
+            <!-- Device Info Section -->
+            <section class="card" id="device-info-section">
+                <h2>Device Information</h2>
+                <div id="device-info">
+                    <p class="placeholder">Connect your device to view information</p>
+                </div>
+                <button id="refresh-info-btn" class="btn secondary" disabled>Refresh Info</button>
+            </section>
+
+            <!-- Genuine Check Section -->
+            <section class="card" id="genuine-section">
+                <h2>Genuine Check</h2>
+                <p class="description">Verify your Ledger device is authentic using Ledger's HSM.</p>
+                <div id="genuine-result"></div>
+                <button id="genuine-btn" class="btn secondary" disabled>Run Genuine Check</button>
+            </section>
+
+            <!-- Bitcoin App Section -->
+            <section class="card" id="bitcoin-section">
+                <h2>Bitcoin App (Mainnet)</h2>
+                <div id="bitcoin-status">
+                    <p class="placeholder">Connect device to check app status</p>
+                </div>
+                <div class="button-group">
+                    <button id="install-bitcoin-btn" class="btn primary" disabled>Install</button>
+                    <button id="update-bitcoin-btn" class="btn primary" disabled>Update</button>
+                    <button id="open-bitcoin-btn" class="btn secondary" disabled>Open App</button>
+                </div>
+            </section>
+
+            <!-- Bitcoin Test App Section -->
+            <section class="card" id="bitcoin-test-section">
+                <h2>Bitcoin Test App (Testnet)</h2>
+                <div id="bitcoin-test-status">
+                    <p class="placeholder">Connect device to check app status</p>
+                </div>
+                <div class="button-group">
+                    <button id="install-bitcoin-test-btn" class="btn primary" disabled>Install</button>
+                    <button id="update-bitcoin-test-btn" class="btn primary" disabled>Update</button>
+                    <button id="open-bitcoin-test-btn" class="btn secondary" disabled>Open App</button>
+                </div>
+            </section>
+
+            <!-- Log Section -->
+            <section class="card">
+                <h2>Activity Log</h2>
+                <div id="log" class="log"></div>
+                <button id="clear-log-btn" class="btn secondary small">Clear Log</button>
+            </section>
+        </main>
+
+        <footer>
+            <p>
+                <a href="https://github.com/AntoinePorins/bacca" target="_blank">GitHub</a> |
+                Minimalist alternative to Ledger Live
+            </p>
+        </footer>
+    </div>
+
+    <script type="module" src="app.js"></script>
+</body>
+</html>
